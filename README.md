@@ -3,7 +3,7 @@
 A minimal coding agent. Three tools — `bash`, `search`, `str_replace` — running
 inside a disposable Docker container.
 
-https://github.com/aleksaljujic/agent-harness/issues/1#issue-5250073577
+[https://github.com/aleksaljujic/agent-harness/issues/1#issue-5250073577](https://github.com/user-attachments/assets/69942193-b5b1-46fd-9b1d-5c15a3892546)
 
 ## Setup
 
