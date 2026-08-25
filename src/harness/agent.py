@@ -4,6 +4,12 @@ from pydantic import ValidationError
 from harness.prompt import DEFAULT_SYSTEM_PROMPT
 from harness.config import settings
 from pydantic import BaseModel, computed_field
+from rich.console import Console
+from rich.panel import Panel
+from rich.syntax import Syntax
+from rich.markdown import Markdown
+
+console = Console()
 
 MODEL = settings.azure_openai_deployment
 
@@ -53,6 +59,8 @@ class Agent:
             self.usage.calls += 1
             
             msg = resp.choices[0].message
+            if hasattr(msg, "reasoning_content") and msg.reasoning_content:
+                console.print(Panel(msg.reasoning_content, title="thinking", border_style="dim", title_align="left"))
             self.messages.append(msg)
             
             if not msg.tool_calls:
@@ -81,17 +89,17 @@ class Agent:
         
         match name:
             case "bash":
-                out = self.sandbox.run(args.command)
-                print(f"[bash] {args.command} -> {out}")
-                return out
+                console.print(Panel(args.command, title="bash", border_style="cyan", title_align="left"))
+                return self.sandbox.run(args.command)
             case "search":
-                out = do_search(self.sandbox, args.pattern, args.glob)
-                print(f"[search] {args.pattern} -> {out}")
-                return out
+                label = f"{args.pattern}" + (f"  ({args.glob})" if args.glob else "")
+                console.print(Panel(label, title="search", border_style="magenta", title_align="left"))
+                return do_search(self.sandbox, args.pattern, args.glob)
             case "str_replace":
                 out = do_str_replace(self.sandbox, args.path, args.old_str, args.new_str)
-                print(f"[edit] {args.path} -> {out}")
+                console.print(Panel(f"{args.path} → {out}", title="edit", border_style="yellow", title_align="left"))
                 return out
+            
         return f"Unknown tool: {name}"
     
     

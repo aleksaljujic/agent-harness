@@ -8,12 +8,15 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "numpy>=2.5.2",
     "openai>=3.3.1",
     "pandas>=3.0.5",
     "pathlib>=1.0.1",
     "pydantic>=2.13.4",
     "pydantic-settings>=2.15.0",
+    "pygame>=2.6.1",
     "python-dotenv>=1.2.3",
+    "rich>=15.0.0",
     "ruff>=0.16.4",
     "scikit-learn>=1.9.0",
 ]
