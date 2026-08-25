@@ -3,6 +3,8 @@
 A minimal coding agent. Three tools — `bash`, `search`, `str_replace` — running
 inside a disposable Docker container.
 
+https://github.com/aleksaljujic/agent-harness/issues/1#issue-5250073577
+
 ## Setup
 
 Requires Docker, Python 3.12+, [uv](https://docs.astral.sh/uv/), and an Azure OpenAI
