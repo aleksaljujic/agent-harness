@@ -3,7 +3,6 @@ import select
 from pathlib import Path
 from rich.console import Console
 from rich.markdown import Markdown
-from rich.panel import Panel
 from harness.sandbox import Sandbox
 from harness.agent import Agent
 
@@ -13,7 +12,7 @@ WORKSPACE = Path(__file__).parent / "workspace"
 
 def run():
     s = Sandbox(WORKSPACE)
-    agent = Agent(s, max_turns=50)
+    agent = Agent(s, max_turns=50, tools=["bash","search"])
     try:
         while True:
             task = read_multiline_input().strip()

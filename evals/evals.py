@@ -1,51 +1,39 @@
-import os, shutil, traceback, json, time
-from harness.sandbox import Sandbox
-from harness.utils import run_agent
+import json
+import os
+import shutil
+import time
 
-from tasks import TASKS2, SEEDS2
 
-def prepare(name):
+def prepare(name, seeds):
     d = os.path.abspath(f"./eval_ws/{name}")
     shutil.rmtree(d, ignore_errors=True)
     os.makedirs(d)
-    
-    for fname, content in SEEDS2.get(name, {}).items():
+    for fname, content in seeds.get(name, {}).items():
         with open(os.path.join(d, fname), "w") as f:
             f.write(content)
-            
     return d
 
-def log_run(name, messages, ok):
+
+def make_session_id(model: str, tools: list[str]) -> str:
+    tools_slug = "-".join(sorted(tools))
+    return f"{model}__{tools_slug}"
+
+
+def log_run(session_id, name, messages, ok, usage, wall_time=None):
     with open("runs.jsonl", "a") as f:
         f.write(json.dumps({
-            "ts":time.time(),
-            "task":name,
-            "ok":ok,
-            "messages":[m if isinstance(m, dict) else m.model_dump() for m in messages]
-        }, ensure_ascii=False) +"\n")
-
-def main():
-    passed = 0
-    
-    for name, task, check in TASKS2:
-        workdir = prepare(name)
-        s = Sandbox(workdir)
-        
-        try:
-            _, messages = run_agent(task, s)
-            ok = bool(check(s))
-        except Exception:
-            ok = False
-            traceback.print_exc()
-        finally:
-            s.destroy()
-        
-        passed += ok
-        log_run(name, messages, ok)
-        print(f"{'PASS' if ok else 'FAIL'} {name}")
-    
-    
-    print(f"\n{passed}/{len(TASKS2)}")
-    
-if __name__ == "__main__":
-    main()
+            "session": session_id,
+            "ts": time.time(),
+            "task": name,
+            "ok": ok,
+            "wall_time": wall_time,
+            "usage": {
+                "prompt": usage.prompt,
+                "completion": usage.completion,
+                "calls": usage.calls,
+                "cost": usage.cost,
+            },
+            "messages": [
+                m if isinstance(m, dict) else m.model_dump() for m in messages
+            ],
+        }, ensure_ascii=False) + "\n")

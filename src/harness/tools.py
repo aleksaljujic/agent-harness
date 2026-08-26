@@ -78,6 +78,16 @@ TOOLS = [
 
 #TOOL FUNCTIONS
 
+#TOOL SELECTION
+
+def get_active_tools(enabled: list[str] | None = None):
+    if enabled is None:
+        return TOOLS, SCHEMAS
+
+    active_tools = [t for t in TOOLS if t["function"]["name"] in enabled]
+    active_schemas = {k: v for k, v in SCHEMAS.items() if k in enabled}
+    return active_tools, active_schemas
+
 def do_search(sandbox, pattern, glob=None):
     include = f"--include={shlex.quote(glob)}" if glob else ""
     cmd = (

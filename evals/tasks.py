@@ -1,3 +1,9 @@
+VARIANTS = {
+    "bash_only": ["bash"],
+    "bash_search": ["bash", "search"],
+    "full": ["bash", "search", "str_replace"],
+}
+
 
 TASKS1 = [
     (

@@ -4,6 +4,7 @@ from pathlib import Path
 IMAGE = "agent-sandbox"
 MEMORY = "2g"
 PIDS = "256"
+SANDBOX_TTL = 3600  # container self-destructs after this even if the harness process is killed
 SCRIPTS = Path(__file__).parent / "scripts"
 
 
@@ -16,13 +17,13 @@ class Sandbox:
 
         self.name = f"agent-{uuid.uuid4().hex[:8]}"
         p = subprocess.run([
-            "docker", "run", "-d", "--name", self.name,
+            "docker", "run", "-d", "--rm", "--name", self.name,
             "--memory", MEMORY, "--pids-limit", PIDS,
             "--user", f"{os.getuid()}:{os.getgid()}",
             "-v", f"{workdir}:/work",
             "-v", f"{SCRIPTS.resolve()}:/opt/agent-scripts:ro",
             "-w", "/work",
-            IMAGE, "sleep", "infinity"
+            IMAGE, "sleep", str(SANDBOX_TTL)
         ], capture_output=True, text=True)
         if p.returncode != 0:
             raise RuntimeError(f"docker run fail:\n{p.stderr}")

@@ -5,3 +5,6 @@ __pycache__/
 workspace/
 eval_ws/
 runs.jsonl
+artifacts/
+notebooks/
+docs/EVALS.md
