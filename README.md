@@ -3,6 +3,8 @@
 A minimal coding agent. Three tools — `bash`, `search`, `str_replace` — running
 inside a disposable Docker container.
 
+https://github.com/user-attachments/assets/006438bd-3239-48da-8a95-3151aae8efde
+
 ## Setup
 
 Requires Docker, Python 3.12+, [uv](https://docs.astral.sh/uv/), and an Azure OpenAI
