@@ -81,4 +81,4 @@ prompt.py       System prompt
 scripts/        Helpers mounted read-only into the container
 ```
 
-See [NOTES.md](docs/NOTES.md) for design decisions and what was learned building it.
+See [NOTES.md](docs/agent/NOTES.md) for design decisions and what was learned building it.

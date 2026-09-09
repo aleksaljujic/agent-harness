@@ -1,18 +1,17 @@
 import sys
 import select
-from pathlib import Path
 from rich.console import Console
 from rich.markdown import Markdown
+from harness.config import settings
 from harness.sandbox import Sandbox
 from harness.agent import Agent
 
 console = Console()
-WORKSPACE = Path(__file__).parent / "workspace"
 
 
 def run():
-    s = Sandbox(WORKSPACE)
-    agent = Agent(s, max_turns=50, tools=["bash","search"])
+    s = Sandbox(settings.workspace)
+    agent = Agent(s, max_turns=50, tools=settings.enabled_tools)
     try:
         while True:
             task = read_multiline_input().strip()

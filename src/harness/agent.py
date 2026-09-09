@@ -1,16 +1,12 @@
 from openai import OpenAI
-from harness.tools import TOOLS, SCHEMAS, do_str_replace, do_search, get_active_tools
+from harness.tools import HANDLERS, get_active_tools
 from pydantic import ValidationError
 from harness.prompt import DEFAULT_SYSTEM_PROMPT
 from harness.config import settings, MODEL_PRICING
 from pydantic import BaseModel, computed_field
-from rich.console import Console
-from rich.panel import Panel
 from harness.providers import make_provider
 from harness.providers.base import ToolCall
 import time
-
-console = Console()
 
 provider = make_provider(settings)
 
@@ -98,20 +94,10 @@ class Agent:
             args = schema.model_validate_json(call.arguments)
         except ValidationError as e:
             return f"ERROR: invalid arguments for {call.name}: {e}"
-        
-        match call.name:
-            case "bash":
-                console.print(Panel(args.command, title="bash", border_style="cyan", title_align="left"))
-                return self.sandbox.run(args.command)
-            case "search":
-                label = f"{args.pattern}" + (f"  ({args.glob})" if args.glob else "")
-                console.print(Panel(label, title="search", border_style="magenta", title_align="left"))
-                return do_search(self.sandbox, args.pattern, args.glob)
-            case "str_replace":
-                out = do_str_replace(self.sandbox, args.path, args.old_str, args.new_str)
-                console.print(Panel(f"{args.path} → {out}", title="edit", border_style="yellow", title_align="left"))
-                return out
-            case _:
-                return f"Unknown tool: {call.name}"
+
+        handler = HANDLERS.get(call.name)
+        if handler is None:
+            return f"Unknown tool: {call.name}"
+        return handler(self.sandbox, args)
     
     

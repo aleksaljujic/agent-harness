@@ -1,0 +1,146 @@
+# Tool-Surface Ablations for LLM Coding Agents: The Yang et al. Paper and the 2025–2026 Literature
+
+## TL;DR
+- **The paper you cited (Yang, Yu & Desell, arXiv:2607.10569) largely supports your hypothesis but reframes it:** across a 3×2×2 ablation (baseline / bash_only / code_only × computation/modification regimes × Claude Code/Codex CLI), pass rates are *statistically tied* across all tool surfaces — tool surface "changes the path and the cost, not the answer." The action is in cost, not success, and the cheapest surface depends jointly on task regime AND agent design.
+- **The broader 2026 literature converges on the same "capability invariance / cost divergence" pattern:** minimal surfaces (bash-only, single execute_code, Lita's 4 tools) match tool-rich scaffolds on success rate while cutting tokens; specialized tools and code execution mostly help with *recovery, navigation efficiency, and edit reliability*, not raw resolution — and the effect shrinks as the base model improves (Lita's "Agent Complexity Law").
+- **For your thesis:** your framing is well-supported, but the strongest, most defensible claim is about **cost/efficiency and error-recovery**, not success-rate superiority. Power your study around cost/token metrics and per-instance paired tests, and expect the minimal-vs-specialized gap to interact with model capability (weak/local models like Qwen2.5-Coder benefit most from structure).
+
+## Key Findings
+
+1. **Yang et al. (arXiv:2607.10569) is the single most on-point paper.** It is the "missing crossed comparison" of three contradictory field claims (ACI needed / bash-only sufficient / replace tools with code execution). Its headline empirical result is *capability invariance*: all four (regime×agent) pass-rate contrasts are non-significant; the differences live entirely in cache-adjusted cost. This validates the spirit of your hypothesis but recasts "sufficient/optimal" as a **cost** claim rather than a **success-rate** claim.
+
+2. **Success-rate parity of minimal toolsets is now a repeated finding.** mini-SWE-agent (bash-only, ~100 lines, no tool-calling API) scores >74% on SWE-bench Verified (its official README states "Just some 100 lines of python… Scores >74% on the SWE-bench verified benchmark," and notes Gemini 3 Pro reaching 74% with it); Lita (arXiv:2509.25873) with a 4-tool set (Editor, Terminal, Search, Finish) matches or beats OpenHands and mini-SWE-agent while using fewer tokens; "To Run or Not to Run" (arXiv:2606.26978) shows restricting code execution costs only 1.25pp of resolve rate (not significant) while saving 56–62% tokens.
+
+3. **Specialized tools help recovery/efficiency, not raw success — with a capability interaction.** SWE-agent's original ACI gave +10.7pp over raw shell on GPT-4 Turbo in 2024, but that gap has eroded as models improved. CODESTRUCT (arXiv:2604.05407) shows AST-structured edit tools mostly reduce cost — except for weaker models, where removing them hurts more (removing readCode costs −7.8 Pass@1 for Qwen3-32B vs −5.2 for GPT-5-mini). Lita's "Agent Complexity Law" formalizes this: the gap between simple and complex agents shrinks as the core model improves, "ultimately converging to a negligible difference."
+
+4. **This is a fast-moving 2026 area.** Beyond your seed papers, the newest directly relevant works include "To Run or Not to Run" (ISSTA 2026), "Yet Even Less Is Even Better" (arXiv:2604.00824), CODESTRUCT (ACL 2026), "Does Code Cleanliness Affect Coding Agents?" (arXiv:2605.20049), ORACLE-SWE (arXiv:2604.07789), SWE-Effi (arXiv:2509.09853), the "Code as Agent Harness" survey (arXiv:2605.18747), and the "Tool-Use Tax" theory paper (arXiv:2605.00136).
+
+## Details
+
+### 1. The primary paper — full source and methodology
+
+**Full citation:** Hong Yang, Qi Yu, Travis Desell. "When Does Restricting a Coding Agent to execute_code Help? A Regime × Agent-Design Ablation." arXiv:2607.10569 [cs.SE], submitted 12 July 2026. Rochester Institute of Technology. Accepted to the Agentic Software Engineering (SE 3.0) Workshop at KDD 2026 (non-archival). 9 pages + references, 4 figures, 4 tables. CC BY 4.0.
+
+**Links:**
+- Abstract: https://arxiv.org/abs/2607.10569
+- PDF: https://arxiv.org/pdf/2607.10569
+- HTML: https://arxiv.org/html/2607.10569v1
+- TeX source: https://arxiv.org/src/2607.10569
+- DOI: https://doi.org/10.48550/arXiv.2607.10569
+- Code/data/harness: https://github.com/hyang0129/onlycodes
+
+**Design (3×2×2):** Three tool-surface arms crossed with two task regimes and two agents, holding model, harness, and prompts fixed.
+- **Arms:** (a) *baseline* — agent's default surface (Claude Code: Read, Grep, Glob, Edit, Write, Bash, subagents; Codex: file primitives, shell, structured apply_patch). (b) *bash_only* — bash plus read-only browsing (read/glob/grep), all file-editing built-ins (Edit/Write/MultiEdit/NotebookEdit) removed; on Codex enforced by prompt-prefix since apply_patch has no disable flag. (c) *code_only* — entire surface replaced by a single MCP tool `mcp__codebox__execute_code`, a persistent Python+Bash REPL keyed by working directory; all native built-ins disallowed.
+- **Regimes:** computation (a new "Artifact" suite, n=93 tasks across 9 categories) and modification (SWE-bench Mini, n=100).
+- **Agents:** Claude Code (model claude-sonnet-4-6, Claude Code 2.1.139) and Codex CLI (model gpt-5.5).
+
+**SWE-bench Mini composition (n=100):** verified-mini (n=50: Django 25, Sphinx 25, drawn from SWE-bench Verified) + datasci-mini (n=50: sklearn 15, matplotlib 12, xarray 8, sympy 7, seaborn 5, astropy 3).
+
+**Integrity measures:** canonical deferred test_patch application (applied only after the agent exits); a pytest --collect-only gate; git-history strip to a single orphan commit (agent cannot recover the upstream fix via git log/show/reflog); per-instance fuse-overlayfs sandboxing with per-arm upper dirs discarded between arms; per-arm subprocess isolation (fresh config dir, no session persistence); 60-minute wall-time cap per (instance, arm, run) with SIGKILL on timeout.
+
+**Metrics & statistics:** Four columns per (benchmark, agent) cell — pass rate (PASS/(PASS+FAIL), env_fail excluded), cache-adjusted cost (median-floor-adjusted; all tokens billed at non-cached rates), input tokens, output tokens. **3 seeds** per (instance, arm); **the unit of inference is the task, not the seed** (seeds collapsed to per-task means). Primary test: **paired Wilcoxon signed-rank (two-sided)** on per-task difference vectors (preferred over paired t-test because per-task Δ distributions are heavy-tailed); 95% normal-approximation CIs; pass rate uses a Wilcoxon-on-rates analogue of McNemar on per-task rates ∈ {0, 1/3, 2/3, 1}. n_tasks ∈ {93, 100}. Cost rates pinned per model (claude-sonnet-4-6, gpt-5.5). Analysis script: paper/data/scripts/paired_contrasts.py, reproducible from released JSONL records.
+
+**Exact results (Table 2 — code_only vs. its cheapest rival; rival = bash_only on Artifact, baseline on SWE-bench):**
+
+| Cell | Δpass (pp) | Δcost adj. (%) | Δinput tok (%) | Δoutput tok (%) |
+|---|---|---|---|---|
+| Artifact/Claude | ≈0 (p=0.739, NS) | **−24.60 (p=7.4×10⁻¹⁴, sig)** | −33.63 (p=1.6×10⁻¹⁵) | −2.86 (NS) |
+| Artifact/Codex | +2.51 (p=0.102, NS) | −6.70 (p=0.254, dir.) | −15.75 (p=0.0014) | −2.70 (NS) |
+| SWE-bench/Claude | −1.67 (p=0.465, NS) | **+14.44 (p=0.120, NS)** | +25.97 (NS) | **+39.86 (p=4.8×10⁻¹⁰, sig)** |
+| SWE-bench/Codex | +0.33 (p=0.697, NS) | **−19.91 (p=2.0×10⁻⁹, sig)** | −24.80 (p=6.0×10⁻⁹) | −0.73 (NS) |
+
+**Key numeric takeaways:**
+- **All four pass-rate contrasts are non-significant** — pass rates differ by <3pp across all cells×arms. "Tool surface changes the path and the cost, not the answer." (Full-precision reported deltas, e.g., Artifact/Claude cost −24.595857141034710% at p=7.365478099521983×10⁻¹⁴; SWE-bench/Claude +14.43754158968527% at p=0.1201551206319861; SWE-bench/Codex −19.90862533703456% at p=2.0169190930532762×10⁻⁹.)
+- code_only is cheaper in 3 of 4 cells (significant on Artifact/Claude and SWE-bench/Codex; directional on Artifact/Codex). The lone reversal is **SWE-bench/Claude (+14.4%, NS)**.
+- **Where the cost lives differs by agent:** SWE-bench/Claude's penalty is concentrated in *output tokens* (+39.9%), driven by expressing every edit as a Python script — path-cost/edit-friction, per-instance Spearman ρ=0.488 (p=2.6×10⁻⁷). SWE-bench/Codex's advantage is concentrated in *input tokens* (−24.8%), via tool-call batching (~2.5 tool calls/LLM step vs ~1.0 for baseline).
+- **bash_only is not monotone:** on SWE-bench/Codex bash_only is the *costliest* arm (+4.83% over baseline, p=0.0047), so the code_only win reflects consolidation into one execute_code round-trip, not tool removal per se.
+- **Per-cell win distributions:** Artifact/Claude 85/93 instances favor code_only (median −$0.023); SWE-bench/Codex 76/100 (median −$0.092); Artifact/Codex 48/93 (near parity); SWE-bench/Claude only 44/100, with loss in a right tail (p75=$0.097, max=$2.33) — "task-structural, not outlier-driven."
+- **Failure-cost localization (§6.3):** the SWE-bench/Claude +14.4% overrun localizes to unanimous-fail and split ("doomed-run") instances; on the unanimous-pass subset the gap collapses sharply — i.e., the edit-friction tax is paid mainly on hard/failed instances, not as a per-edit tax on successful runs.
+- **Codex apply_patch leakage audit** (110 JSONLs, seed 1): file_change events fire 7× on bash_only and 4× on code_only (both <1%) vs 344× on baseline — confirming the restriction largely held.
+
+**Theoretical frame:** the paper adopts Zhang et al.'s (2026) "tool-use tax" / Capability Overlap Principle — a tool nets benefit only when its task-specific capability gain exceeds the per-call cost of carrying its definition. Most Claude Code primitives are bash-subsets (Read/Grep/Glob/Write ≈ cat/grep/find/heredoc); only Edit has non-overlapping capability (atomic byte-precise replacement with linting).
+
+**How to align/differentiate your thesis:**
+- **Align:** adopt their integrity-clean SWE-bench protocol (deferred test_patch, git-history strip, per-arm isolation), task-as-unit-of-inference with paired Wilcoxon, and cache-adjusted cost reporting.
+- **Differentiate:** they do NOT test your exact contrast (bash+editor vs +grep/read_file/find_file/run_tests), do NOT use SWE-bench Lite (they use a 100-task Mini), and only test frontier proprietary models (Sonnet-4.6, GPT-5.5). Your gpt-5.4-nano/mini, o3 (reasoning), and local Qwen2.5-Coder directly probe the **capability-interaction** axis they hold nearly fixed (they show invariance only at frontier sizes). Your "specialized tools mainly help debugging/recovery" hypothesis maps precisely onto their failure-cost finding and "To Run or Not to Run"'s recovery analysis.
+
+### 2. Survey of newest & most-related papers
+
+**A. Lita: Light Agent Uncovers the Agentic Coding Capabilities of LLMs** — Hankun Dai, Maoquan Wang, Mengnan Qi, Yikai Zhang, Zijian Jin, Yongqiang Yao, Yufan Huang, Shengyu Fu, Elsie Nallipogu. arXiv:2509.25873 (submitted 30 Sept 2025). https://arxiv.org/abs/2509.25873
+- **Methodology:** "Lite Agent" with a minimal tool set — Editor, Terminal, Search, Finish — invoked via function calls. Variants: Lita (full), Lita-diff (git-diff edits), Lita-mini (terminal-only). Benchmarks: HumanEval, Aider Polyglot, SWE-bench Verified. Baselines: OpenHands, mini-SWE-agent, Aider. Metrics: pass@1/resolve rate, token consumption, per-tool call counts, and "liteness" (action count + system preloaded tokens).
+- **Findings:** (a) On Polyglot, Lita ≥ OpenHands across nearly all models with fewer tokens (OpenHands shows SWE-bench overfitting). On SWE-bench, e.g. GPT-4.1-mini: Official 22.8 / OpenHands 22.0 / mini-SWE 23.94 / Lita 26.4 / Lita-mini 11.8; Claude 3.7 Sonnet: 61.0 / 58.0 / 52.8 / 53.0 / 48.6. (b) Fewer tokens, less design effort. (c) **Agent Complexity Law:** the gap between simple and sophisticated agents shrinks as the base model improves, "ultimately converging to a negligible difference." (d) Lita-mini (terminal-only) underperforms on hard SWE-bench — evidence that some structure helps weaker configurations/harder tasks.
+
+**B. To Run or Not to Run: Analyzing the Cost-Effectiveness of Code Execution in LLM-Based Program Repair** — Zhihao Lin, Junhua Zhu, Mingyi Zhou, Xin Wang, Zhensu Sun, Renyu Yang, David Lo, Li Li. arXiv:2606.26978 (June 2026; accepted ISSTA 2026). https://arxiv.org/abs/2606.26978
+- **Methodology:** Two-stage. Stage 1: analyze 7,745 SWE-bench leaderboard traces (4 agents, 12 LLMs, Lite+Verified). Stage 2: 3,000 end-to-end repair attempts over 200 SWE-bench instances (first 100 Lite + first 100 Verified) × 3 agents (Claude Code+Sonnet-4.5, Codex+GPT-5.2-xhigh, open-source OpenCode+Qwen2.5-Coder-32B) × 4 execution paradigms (Prohibited → Unrestricted). Code execution isolated as a single controlled variable, scaffold fixed.
+- **Findings:** (a) Execution used by all (avg 8.8 runs/task, range 2–19); late-stage executions succeed more (e.g., OpenHands+Claude-3.5-Sonnet 42%→72%). (b) **Execution restriction costs only 1.25pp resolve rate (NS, p>0.05) on commercial agents, ≈0pp for OpenCode/Qwen2.5-Coder**, while Prohibited saves 56–62% tokens and 48–54% wall-clock on Claude Code (e.g., Claude Code 63% without execution vs 64% with). (c) Benefit is *concentrated, not uniform*: 54–66% of cases complete in a single edit; outcome transitions across 600 pairs are 269 Pass→Pass, 278 Fail→Fail, 24 Pass→Fail, 29 Fail→Pass (net benefit only 5 cells). Conclusion: execution is a resource with an explicit cost-benefit tradeoff, not a default. **Directly supports your "specialized capability helps recovery on a minority of instances, not raw success" hypothesis — and includes a local Qwen2.5-Coder.**
+
+**C. AblationBench: Evaluating Automated Planning of Ablations in Empirical AI Research** — Talor Abramovich, Gal Chechik. arXiv:2507.08038 (July 2025, v3 June 2026; AI4Science Workshop, ICML 2026). https://arxiv.org/abs/2507.08038 ; site https://ablation-bench.github.io/
+- **Methodology:** Benchmark for LM agents *planning ablation experiments* (two tasks: AuthorAblation, ReviewerAblation), with LM-based judges. Agent planners use SWE-agent (default file/edit/exec tools) with frontier LMs (GPT-5.4, Llama 3.1 405B, GPT-OSS 120B, MiniMax M2.5, Qwen 3.5 122B); LM-only planners add o3-mini, Gemini 2.5 Flash.
+- **Relevance:** This is about *designing* ablations, not tool-surface ablation of coding agents. Useful as methodological/meta context and a citation on rigorous ablation design, but NOT a tool-minimalism study — include as tangential.
+
+**D. HyperAgent: Generalist Software Engineering Agents to Solve Coding Tasks at Scale** — Huy Nhat Phan, Tien N. Nguyen, Phong X. Nguyen, Nghi D. Q. Bui. arXiv:2409.16299 (Sept 2024, v3 Sept 2025). https://arxiv.org/abs/2409.16299
+- **Methodology:** Generalist multi-agent system with four specialized agents (Planner, Navigator, Code Editor, Executor) mimicking a human developer workflow via an asynchronous message queue; evaluated on SWE-bench, RepoExec, Defects4J across languages.
+- **Relevance:** This is a *maximalist/specialized* design — the opposite pole from bash-only. Use it as a contrast/foil in related-work: it argues specialized decomposition helps but predates the 2026 "capability invariance" findings and runs no minimal-vs-specialized ablation. Position it as the "specialized tools help" thesis your work tests against.
+
+**E. CODESTRUCT: Code Agents over Structured Action Spaces** — Myeongsoo Kim, Joe Hsu, Dingmin Wang, Shweta Garg, Varun Kumar, Murali Krishna Ramanathan (AWS AI Labs). arXiv:2604.05407 (April 2026; ACL 2026). https://arxiv.org/abs/2604.05407
+- **Methodology:** Replaces text-span editing with AST-entity primitives — readCode (retrieve a full syntactic unit) and editCode (syntax-validated transform on a named entity like file.py::Class::method). Compares structured vs text-based action spaces on SWE-bench Verified.
+- **Findings:** Reduces context read (~50 lines vs ~300) and lowers inference cost up to 33% at matched accuracy for strong models. **Capability interaction:** removing readCode costs −7.8 Pass@1 for Qwen3-32B vs −5.2 for GPT-5-mini, and structured navigation is "critical for scalable repository-level reasoning, especially for weaker models"; the weak GPT-5-nano gains +20.8pp accuracy because structured actions enable sustained exploration that would otherwise terminate. **Strong evidence for your capability-interaction axis: structure matters more for weaker models — highly relevant to your Qwen2.5-Coder and nano-tier tests.**
+
+**F. Yet Even Less Is Even Better For Agentic, Reasoning, and Coding LLMs** — CodeArts Model Team (Yang Ye et al., 26 authors). arXiv:2604.00824 (April 2026, v3 6 Apr 2026). https://arxiv.org/abs/2604.00824
+- **Methodology:** "Less-Is-More" for *training data* — STITCH mechanism (Sliding-memory Trajectory Inference + Task Chunking) filters trajectories. Frameworks: mini-SWE-agent, MSWE-agent; scales 30B–355B; Python/Java/ArkTS.
+- **Findings:** Superior agentic capability with fewer, higher-quality trajectories (e.g., Multi-SWE-bench Java 43.75%, +16.67%; ArkTS compilation pass rate 61.31%, +43.34%, with <1K trajectories). **Note:** this is training-data minimalism, not tool-surface minimalism — relevant to the "less is more" motif and it uses the bash-only mini-SWE-agent as scaffold, but differentiate it clearly.
+
+**G. Does Code Cleanliness Affect Coding Agents? A Controlled Minimal-Pair Study** — Priyansh Trivedi, Olivier Schmitt (SonarSource). arXiv:2605.20049 (19 May 2026). https://arxiv.org/abs/2605.20049
+- **Methodology:** Minimal-pair repositories (matched architecture/deps/behavior, differing on static-analysis violations & cognitive complexity), constructed bidirectionally; 33 tasks across 6 pairs, hidden tests, 660 trials with Claude Code (Claude Sonnet 4.6).
+- **Findings:** Cleanliness does NOT change pass rate but cuts tokens 7–8% and file revisitations ~34%. **Methodologically exemplary for your thesis:** same "capability invariant, cost variant" pattern, and a clean template for controlled paired design and operational-footprint metrics (file revisitations as a recovery/navigation proxy).
+
+**H. ORACLE-SWE: Quantifying the Contribution of Oracle Information Signals on SWE Agents** — Kenan Li, Qirui Jin, Liao Zhu, et al. (16 authors). arXiv:2604.07789 (April 2026). https://arxiv.org/abs/2604.07789
+- **Methodology:** Isolates five contextual signals (Reproduction Test, Regression Test, Edit Location, Execution Context, API Usage), injects oracle (ground-truth) versions, measures upper-bound contribution and cost on SWE-bench Verified, SWE-bench-Live, and SWE-bench-Pro (Python+Go). Each ablation run 3× with std reported.
+- **Relevance:** Complements your work — it ablates *information signals* rather than tool surfaces, but the methodology (controlled injection, upper-bound quantification, cost tracking, multi-benchmark) is a strong template, and its finding that edit-location/execution-context signals drive most gains speaks to *why* run_tests/grep-style tools help (they surface these signals).
+
+**I. SWE-Effi: Re-Evaluating Software AI Agent System Effectiveness Under Resource Constraints** — Zhiyu Fan, Kirill Vasilevski, Dayi Lin, Boyuan Chen, Yihao Chen, Zhiqing Zhong, Jie M. Zhang, Pinjia He, Ahmed E. Hassan. arXiv:2509.09853 (submitted 11 Sept 2025, rev. 18 Sept 2025; ICLR 2026 submission). https://arxiv.org/abs/2509.09853
+- **Methodology:** New resource-aware effectiveness metrics balancing resolve rate against token & wall-clock cost.
+- **Key finding:** an "expensive failures" pattern — unresolved attempts consume on average ~4× more resources than successful ones. This is the empirical motivation for cost-aware (not just pass-rate) evaluation and directly underpins Yang et al.'s failure-cost mechanism. **Adopt SWE-Effi metrics in your harness to make the cost side rigorous.**
+
+**J. Code as Agent Harness: Toward Executable, Verifiable, and Stateful Agent Systems** — Xuying Ning, Katherine Tieu, Dongqi Fu, Tianxin Wei, et al. (UIUC/Meta/Stanford). arXiv:2605.18747 (18 May 2026). https://arxiv.org/abs/2605.18747
+- **Methodology:** ~197-paper survey; three-layer taxonomy (harness interface / mechanisms / scaling). Positions code (execute_code) as the operational substrate for reasoning, action, and verification.
+- **Relevance:** The best single survey to anchor your related-work section and to situate the "replace tools with code execution" claim. Explicitly names "evaluation beyond final task success" as an open challenge — exactly your thesis's angle.
+
+**K. Are Tools All We Need? Unveiling the Tool-Use Tax in LLM Agents** — Zhang et al. arXiv:2605.00136 (May 2026). https://arxiv.org/abs/2605.00136
+- **Methodology:** Factorized intervention framework decomposing the CoT–Tool gap into style cost (Δsty), function-calling protocol overhead (Δfrc), and computation gain (Δcmp); introduces the Capability Overlap Principle; benchmarks GSM8K-Sem-Distractor / HotPotQA-Sem-Distractor.
+- **Relevance:** This is the theoretical backbone Yang et al. cite. Many apparent tool gains are redundant with native capability while protocol overhead is broad — the formal explanation for why minimal toolsets match specialized ones. **Cite as your theoretical frame.**
+
+**Supporting/context works worth a sentence each:**
+- **SWE-agent** (Yang et al., arXiv:2405.15793, NeurIPS 2024) — the original ACI ablation and the historical "specialized tools help" anchor. On SWE-bench Lite (300 instances) with GPT-4 Turbo (gpt-4-1106-preview), the ACI gave +10.7pp over the default-shell baseline (18.00% vs ~11.00%, a ~64% relative gain); integrated edit linting contributed +3.0pp, summarized search interfaces +6.0pp over iterative search, and a 100-line file-viewer window was optimal.
+- **mini-SWE-agent** (github.com/SWE-agent/mini-swe-agent) — bash-only, ~100 lines, no tool-calling API, >74% SWE-bench Verified; the "bash is sufficient" anchor.
+- **SWE-Edit** (arXiv:2604.26102) — editing-tool improvements raise *edit success* +12.8–18.3pp but resolve rate only +2.7–4.1pp across reasoning models (Kimi-K2, MiniMax-M2.1, GLM-4.7); i.e., tool quality helps edit reliability far more than success.
+- **SWE-bench Pro** (arXiv:2509.16941; 1,865 harder, multi-file, contamination-resistant tasks) and **SWE-bench Verified Mini** (random 50-task subset) as benchmark-selection options alongside your planned SWE-bench Lite (300 instances).
+
+### 3. What the literature collectively says about your four sub-questions
+
+**(a) Does minimal (bash+editor) match/beat specialized on success rate?** Yes, at the success-rate level, repeatedly and across models: Yang et al. (all pass contrasts NS), "To Run or Not to Run" (1.25pp NS), Lita (matches/beats OpenHands), mini-SWE-agent (>74%), Code Cleanliness (pass unchanged). "Beat" is rare and usually within noise; "match" is the robust claim.
+
+**(b) Token/cost efficiency differences.** Large and consistently in favor of minimal/consolidated surfaces: execute_code −20% to −25% cost on 3/4 Yang et al. cells; Prohibited-execution saves 56–62% tokens / 48–54% wall-clock; CODESTRUCT up to −33% cost; cleaner code −7–8% tokens. Cost is where the real signal lives.
+
+**(c) Specialized tools help recovery/debugging, not raw success.** Strongly supported: Yang et al. localize the only code_only penalty to *doomed-run/failure trajectories* (edit-friction tax paid on hard/failed instances); "To Run or Not to Run" shows execution benefit concentrated in a minority of instances and in late-stage recovery; SWE-Edit shows editing tools boost *edit success* far more than resolve rate; ORACLE-SWE shows edit-location/execution-context signals (surfaced by grep/run_tests-style tools) carry most of the potential gain.
+
+**(d) Interaction with model capability/reasoning.** The gap between minimal and specialized **shrinks as models improve** (Lita's Agent Complexity Law; SWE-agent's original +10.7pp has eroded). Weaker/local models benefit most from structure (CODESTRUCT: removing readCode −7.8 Pass@1 for Qwen3-32B vs −5.2 for GPT-5-mini, and GPT-5-nano +20.8pp with structured actions; Lita-mini collapses on hard tasks). For a local Qwen2.5-Coder, "To Run or Not to Run" found execution restriction ≈0pp on resolve but the model retries more and self-validates poorly (only ~11% of failed cases pass self-validation vs 81–100% for commercial agents) — a distinct failure mode. Reasoning-vs-non-reasoning tool minimalism specifically is under-studied — a genuine gap your thesis (o3 vs gpt-5.4-nano/mini vs Qwen) can fill.
+
+## Recommendations
+
+**Stage 1 — Frame the hypothesis correctly (before running anything).** Reframe your central claim from "minimal toolset is sufficient/optimal for *task success*" to the two-part, better-supported claim: (i) minimal toolset (bash + str_replace editor) is *success-rate-equivalent* to specialized toolsets, and (ii) specialized tools (grep/read_file/find_file/run_tests) primarily reduce cost and aid error-recovery on a minority of hard/failed instances. This is exactly what Yang et al., "To Run or Not to Run," and Code Cleanliness jointly establish. Anchor theory in the Tool-Use Tax / Capability Overlap Principle (arXiv:2605.00136).
+
+**Stage 2 — Adopt field-standard rigor.** Use the Yang et al. integrity-clean SWE-bench protocol (deferred test_patch, git-history strip, per-arm sandbox isolation). Make **task the unit of inference** with **3+ seeds**, collapse to per-task means, and use **paired Wilcoxon signed-rank** with per-task difference vectors (their paired_contrasts.py is a public reference). Report **both** pass rate AND cost — adopt SWE-Effi metrics (arXiv:2509.09853) and cache-adjusted cost. Track recovery-specific metrics: file revisitations (Code Cleanliness), tool-call counts per step, and Pass→Fail / Fail→Pass transition matrices ("To Run or Not to Run").
+
+**Stage 3 — Design arms to isolate exactly your variables.** Define arms as: (A) bash + str_replace only; (B) +grep/search; (C) +read_file/find_file; (D) +run_tests; (E) full. This is finer-grained than Yang et al.'s three arms and is your novel contribution. On SWE-bench Lite (n=300, or a fixed sub-sample for cost) run all arms × your four models.
+
+**Stage 4 — Center the capability-interaction axis (your biggest novelty).** Because frontier work shows capability invariance only at frontier sizes, your gpt-5.4-nano / gpt-5.4-mini / o3 / Qwen2.5-Coder ladder is the differentiator. Pre-register the prediction (from CODESTRUCT + Lita's Agent Complexity Law) that specialized tools yield the largest success-rate gains on the weakest model (Qwen2.5-Coder, nano) and negligible gains on o3/mini. Include a reasoning-vs-non-reasoning contrast (o3 vs gpt-5.4-mini) — this specific interaction is under-studied and is publishable.
+
+**Benchmarks/thresholds that would change the recommendation:** If, on SWE-bench Lite, adding run_tests raises resolve rate by a *statistically significant* margin (paired Wilcoxon p<0.05, not just a few points) on the strong models too, your hypothesis is falsified for that tool and you should report it as the exception (analogous to Yang et al.'s SWE-bench/Claude reversal). If token/cost differences are NOT significant, your efficiency claim weakens and you should pivot to the recovery-only claim. If Qwen2.5-Coder shows the *same* invariance as o3, the capability-interaction thesis fails and you should report the Agent Complexity Law as already saturated at that scale.
+
+## Caveats
+- **arXiv:2607.10569 is a non-archival KDD 2026 workshop paper** (9 pages) with a single version (v1), not yet peer-reviewed in an archival venue; treat its precise numbers as preliminary. Its "Artifact" computation suite is a new, non-externally-validated benchmark, and Codex restriction was prompt-enforced (soft), not hard-flagged — the authors themselves flag this as a limitation.
+- Several cited works use **different frontier model versions** (Sonnet-4.5/4.6, GPT-5.2/5.5) than your planned stack (gpt-5.4-nano/mini, o3, Qwen2.5-Coder); absolute numbers will not transfer, only the qualitative patterns.
+- The date context (September 2026) means some "newest" papers are very recent preprints; the §5.4/Table 4 conditional-cost figures in Yang et al. and some downstream results could shift in later versions.
+- **"To Run or Not to Run" ablates code *execution*, not tool *surface*** — related but not identical to your grep/read/find ablation; be precise in related-work about this distinction. Likewise "Yet Even Less" and AblationBench are about training-data and ablation-planning respectively, not tool surfaces.
+- Some figures were cross-checked against secondary aggregators (Hugging Face, alphaXiv, ResearchGate) where primary PDFs were rate-limited; core numbers were verified against arXiv abstract/HTML where possible, but confirm exact table values against the primary PDFs before citing in your thesis.

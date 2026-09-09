@@ -1,11 +1,12 @@
 import os, subprocess, uuid
 from pathlib import Path
 
+from harness.config import settings, SCRIPTS
+
 IMAGE = "agent-sandbox"
 MEMORY = "2g"
 PIDS = "256"
 SANDBOX_TTL = 3600  # container self-destructs after this even if the harness process is killed
-SCRIPTS = Path(__file__).parent / "scripts"
 
 
 class Sandbox:
@@ -28,7 +29,8 @@ class Sandbox:
         if p.returncode != 0:
             raise RuntimeError(f"docker run fail:\n{p.stderr}")
                 
-    def run(self, command, timeout=60):
+    def run(self, command, timeout=None):
+        timeout = timeout if timeout is not None else settings.timeout
         try:
             p = subprocess.run(
                 ["docker", "exec", self.name, "bash", "-lc", command],

@@ -7,4 +7,4 @@ eval_ws/
 runs.jsonl
 artifacts/
 notebooks/
-docs/EVALS.md
+docs/evals/EVALS.md

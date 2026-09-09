@@ -10,7 +10,8 @@ class OpenAIProvider(LLMProvider):
         resp = self.client.chat.completions.create(
             model=self.model,
             messages=messages,
-            tools = tools
+            tools = tools,
+            temperature=0.0
         )
         latency = getattr(resp, "latency_checkpoint", None)
         msg = resp.choices[0].message
