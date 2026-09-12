@@ -28,13 +28,21 @@ def handler(sandbox, args: SearchArgs) -> str:
     label = f"{args.pattern}" + (f"  ({args.glob})" if args.glob else "")
     console.print(Panel(label, title="search", border_style="magenta", title_align="left"))
 
-    include = f"--include={shlex.quote(args.glob)}" if args.glob else ""
+    # --include is a basename glob, so it never matches a glob containing "/"
+    # (e.g. a full file path); in that case search within that path instead.
+    include, target = "", "."
+    if args.glob:
+        if "/" in args.glob:
+            target = shlex.quote(args.glob)
+        else:
+            include = f"--include={shlex.quote(args.glob)}"
+
     cmd = (
         f"grep -rn {include} --exclude-dir=.git --exclude-dir=node_modules "
-        f"-E {shlex.quote(args.pattern)} . | head -50"
+        f"-E {shlex.quote(args.pattern)} {target} | head -50"
     )
     out = sandbox.run(cmd).strip()
-    if not out or out.startswith("(no output)"):
+    if not out or out.startswith("Without return") or out.startswith("(no output)"):
         return "No matches."
     return out
 

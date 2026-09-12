@@ -18,11 +18,8 @@ class Price(NamedTuple):
 
 
 MODEL_PRICING = {
-    "gpt-5.6-sol":   Price(5.00, 30.00),
-    "gpt-5.6-terra": Price(2.00, 12.00),
-    "gpt-5.6-luna":  Price(0.20, 1.20),
-    "gpt-5.4-nano":  Price(0.20, 1.25),
-    "gpt-5-nano":    Price(0.05, 0.40),
+    "gpt-5.4-nano": Price(0.20, 1.25),
+    "gpt-5.4-mini": Price(0.75, 4.50),
 }
 
 
@@ -39,6 +36,8 @@ class Settings(BaseSettings):
 
     max_turns: int = Field(20, ge=1, le=100)
     timeout: int = Field(60, ge=1, le=600)
+
+    reasoning_effort: str | None = None  # None | minimal | low | medium | high
 
     enabled_tools: list[str] = Field(
         default_factory=lambda: ["bash", "search", "str_replace", "read_file", "find_file", "run_tests"]
@@ -58,6 +57,16 @@ class Settings(BaseSettings):
         if parsed.scheme == "http" and parsed.hostname not in LOCAL_HOSTS:
             raise ValueError(f"endpoint may only use http:// for {sorted(LOCAL_HOSTS)}, not {parsed.hostname!r}")
         return v.rstrip("/")
+
+    @field_validator("reasoning_effort")
+    @classmethod
+    def known_effort(cls, v):
+        if v in (None, "", "none"):
+            return None
+        allowed = {"minimal", "low", "medium", "high"}
+        if v not in allowed:
+            raise ValueError(f"reasoning_effort must be one of {sorted(allowed)} or None, got {v!r}")
+        return v
 
     @field_validator("enabled_tools")
     @classmethod

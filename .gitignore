@@ -8,3 +8,6 @@ runs.jsonl
 artifacts/
 notebooks/
 docs/evals/EVALS.md
+/logs/
+predictions/
+scratch/

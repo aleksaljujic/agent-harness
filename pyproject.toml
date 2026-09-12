@@ -37,3 +37,6 @@ dev = [
     "matplotlib>=3.11.1",
     "nbconvert>=7.17.1",
 ]
+swebench = [
+    "swebench>=4.0.0",
+]

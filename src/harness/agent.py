@@ -13,10 +13,13 @@ provider = make_provider(settings)
 class Usage(BaseModel):
     prompt: int = 0
     completion: int = 0
+    reasoning: int = 0
     calls: int = 0
     model: str = ""
     llm_time_seconds: float = 0.0
     tool_time_seconds: float = 0.0
+    tool_calls: dict[str, int] = {}
+    tool_call_errors: dict[str, int] = {}
     
     @computed_field
     @property
@@ -36,6 +39,8 @@ class Agent:
         self.max_turns = max_turns or settings.max_turns
         self.tools, self.schemas = get_active_tools(tools)
         self.usage: Usage = Usage(model = self.provider.model)
+        self.termination_reason: str = "unstarted"
+        self.turns_used: int = 0
         self.messages = [
             {
                 "role": "system",
@@ -49,39 +54,43 @@ class Agent:
              "content": task
         })
         
-        for _ in range(self.max_turns):
-            
+        for turn in range(self.max_turns):
+            self.turns_used = turn + 1
+
             t0 = time.perf_counter()
             result = self.provider.complete(self.messages, self.tools)
             llm_time = time.perf_counter() - t0
-            
+
             self.usage.llm_time_seconds += llm_time
-            
+
             prompt_tokens, completion_tokens = result.usage
             self.usage.prompt += prompt_tokens
             self.usage.completion += completion_tokens
+            self.usage.reasoning += result.reasoning_tokens
             self.usage.calls += 1
-            
-            self.messages.append(result.raw_message)
-            
+
+            self.messages.append(result.assistant_message)
+
             if not result.tool_calls:
+                self.termination_reason = "completed"
                 return result.content
-            
-            tool_timings = []
-            
+
             for call in result.tool_calls:
                 t0 = time.perf_counter()
                 out = self._dispatch(call)
-                tool_timings.append((call.name, time.perf_counter() - t0))
-                tool_time = time.perf_counter() - t0
-                self.usage.tool_time_seconds += tool_time
-                
+                self.usage.tool_time_seconds += time.perf_counter() - t0
+
+                self.usage.tool_calls[call.name] = self.usage.tool_calls.get(call.name, 0) + 1
+                if isinstance(out, str) and out.startswith(("ERROR", "Unknown tool")):
+                    self.usage.tool_call_errors[call.name] = self.usage.tool_call_errors.get(call.name, 0) + 1
+
                 self.messages.append({
-                    "role": "tool", 
-                    "tool_call_id": call.id, 
+                    "role": "tool",
+                    "tool_call_id": call.id,
                     "content": str(out) if out is not None else "(no output)"
                 })
-                
+
+        self.termination_reason = "max_turns"
         return "Maximum number of steps reached"
                 
     def _dispatch(self, call: ToolCall):

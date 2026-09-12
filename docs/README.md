@@ -18,7 +18,10 @@
 ## swebench/
 - [`SWEBENCH_INTEGRATION_STATUS.md`](swebench/SWEBENCH_INTEGRATION_STATUS.md) — what exists vs. what's missing to run SWE-bench Lite; recommended split (harness → predictions, official `swebench` → scoring); task checklist.
 - [`SMOKE_TEST_EXAMPLE.md`](swebench/SMOKE_TEST_EXAMPLE.md) — one-instance end-to-end walkthrough (checkout → agent → diff → evaluator → `resolved`), with exit criteria.
+- [`CLI.md`](swebench/CLI.md) — `scripts/run_swebench.py` — svaki flag, instance-selection modovi, primeri, i šta se piše u `artifacts/swebench/`.
+- [`DATASET.md`](swebench/DATASET.md) — struktura SWE-bench Lite dataseta: splitovi (dev/test), poreklo instanci, značenje svake kolone.
 - [`METRICS.md`](swebench/METRICS.md) — per-run result-row schema and the aggregate metrics for the tool-ablation experiment.
+- [`METRICS_SWE.md`](swebench/METRICS_SWE.md) — field-by-field objašnjenje sirovog reda iz `artifacts/swebench/` i razlike u odnosu na stari `evals` runner.
 - [`AUDIT_REPORT.md`](swebench/AUDIT_REPORT.md) — static integrity audit of the harness against the SWE-bench protocol (test-patch timing, git-history exposure, isolation, timeouts).
 
 ## research/
