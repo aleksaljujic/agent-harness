@@ -39,7 +39,7 @@ class Sandbox:
         try:
             p = subprocess.run(
                 ["docker", "exec", self.name, "bash", "-lc", command],
-                capture_output=True, text=True, timeout=timeout
+                capture_output=True, text=True, errors="replace", timeout=timeout
             )
             combined = p.stdout + p.stderr
             if not combined:

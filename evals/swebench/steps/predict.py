@@ -59,3 +59,14 @@ def write_predictions(path, records: list[Prediction]) -> Path:
                 "model_patch": r["model_patch"],
             }) + "\n")
     return path
+
+
+def read_predictions(path) -> list[Prediction]:
+    """Load a predictions.jsonl back — the resume path's source of already-done work.
+
+    Missing file is not an error: a session that never started simply has none.
+    """
+    path = Path(path)
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]

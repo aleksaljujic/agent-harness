@@ -164,7 +164,7 @@ expected and preferred over one full rewrite.
 ```python
 def do_search(sandbox, pattern, glob=None):
     include = f"--include={shlex.quote(glob)}" if glob else ""
-    cmd = f"grep -rn {include} --exclude-dir=.git --exclude-dir=node_modules -E {shlex.quote(pattern)} . | head -50"
+    cmd = f"grep -rn {include} --exclude-dir=   .git --exclude-dir=node_modules -E {shlex.quote(pattern)} . | head -50"
     out = sandbox.run(cmd).strip()
     if not out: return "No matches."
     return out

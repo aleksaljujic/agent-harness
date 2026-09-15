@@ -1,4 +1,5 @@
 import json
+import shutil
 import subprocess
 import threading
 import time
@@ -6,6 +7,7 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 
+from openai import OpenAIError
 from tqdm import tqdm
 
 from evals.evals import make_session_id
@@ -20,6 +22,10 @@ from harness.providers import make_provider
 from harness.sandbox import Sandbox
 
 DEFAULT_TOOLS = list(TOOL_UNIVERSE)
+
+# How long to let an over-running agent thread wind down after it is asked to stop,
+# before giving up on it and recording the row anyway.
+STOP_GRACE_SECONDS = 5
 
 
 def _harness_sha() -> str:
@@ -48,8 +54,11 @@ def _error_detail(e: Exception) -> dict:
     body = getattr(e, "body", None)
     if body is not None:
         detail["body"] = body
-        if isinstance(body, dict) and isinstance(body.get("error"), dict):
-            err = body["error"]
+        if isinstance(body, dict):
+            # The OpenAI SDK hands back the flat error dict ({message, type, param,
+            # code}), not the {"error": {...}} envelope this used to assume — so
+            # api_code/api_message silently stayed None on every captured error.
+            err = body["error"] if isinstance(body.get("error"), dict) else body
             detail["api_code"] = err.get("code")
             detail["api_param"] = err.get("param")
             detail["api_message"] = err.get("message")
@@ -57,6 +66,11 @@ def _error_detail(e: Exception) -> dict:
     text = getattr(response, "text", None) if response is not None else None
     if text is not None:
         detail["response_text"] = text[:20000]
+    # Set by OpenAIProvider when it exhausted its invalid_prompt retries: without it
+    # a run that retried and still failed looks identical to one that never retried.
+    retries = getattr(e, "invalid_prompt_retries", None)
+    if retries is not None:
+        detail["invalid_prompt_retries"] = retries
     return detail
 
 
@@ -83,21 +97,47 @@ def _run_agent_bounded(agent: Agent, task: str, timeout: int) -> tuple[str, str,
             box["ret"] = agent.run(task)
         except Exception as e:  # noqa: BLE001
             box["exc"] = e
+            # Captured here, not in _error_detail: traceback.format_exc() reads the
+            # *current thread's* exception state, which is already gone by the time
+            # the main thread calls it after t.join() — it silently returned
+            # "NoneType: None" for every harness_error/api_error caught this way.
+            box["tb"] = traceback.format_exc()
 
     t = threading.Thread(target=target, daemon=True)
     t.start()
     t.join(timeout)
     if t.is_alive():
+        # Ask the agent to stop and give it a moment to leave the current turn, so
+        # agent.usage has settled before run_one reads it for the row. Without this
+        # the thread keeps running: the row's cost/token columns are a mid-flight
+        # snapshot, and the abandoned thread goes on dispatching tools into a sandbox
+        # run_one is about to destroy. Still alive after the grace period means it is
+        # blocked inside provider.complete(), which needs a client-level request
+        # timeout instead — this event cannot interrupt a blocking socket read.
+        agent.stop.set()
+        t.join(STOP_GRACE_SECONDS)
         return "wall_timeout", "", {}
     if "exc" in box:
-        detail = _error_detail(box["exc"])
-        return "api_error", detail["type"], detail
+        exc = box["exc"]
+        detail = _error_detail(exc)
+        if box.get("tb"):
+            detail["traceback"] = box["tb"]
+        # openai.OpenAIError is the common base for every provider-side failure
+        # (rate limit, moderation, connection). Anything else raised inside
+        # agent.run() (a tool handler, sandbox subprocess, etc.) is a harness bug,
+        # not an API failure — mislabeling it "api_error" hides real bugs inside a
+        # bucket meant for provider outages, and confuses RECOMMENDATION.md's
+        # planned exclusion rules (which treat "API failure" and "infrastructure
+        # failure" as separate categories).
+        reason = "api_error" if isinstance(exc, OpenAIError) else "harness_error"
+        return reason, detail["type"], detail
     return agent.termination_reason, "", {}
 
 
 def run_one(instance: dict, tools: list[str], run_index: int, *, provider, session_id,
             work_root: Path, max_turns: int, run_timeout: int,
-            harness_sha: str) -> tuple[RunRow, list, Prediction, dict]:
+            harness_sha: str, temperature: float | None = None,
+            keep_work: bool = False) -> tuple[RunRow, list, Prediction, dict]:
     iid = instance["instance_id"]
     workdir = work_root / session_id / iid / str(run_index)
 
@@ -134,6 +174,13 @@ def run_one(instance: dict, tools: list[str], run_index: int, *, provider, sessi
     finally:
         if s:
             s.destroy()
+        # The checkout is ~80MB and nothing reads it after predict.extract() has the
+        # diff in hand — left behind, 1200 runs come to ~100GB and the batch dies on
+        # a full disk long before it finishes. Deleted unless explicitly kept for
+        # debugging. Safe only because predictions are persisted per run now; while
+        # they were written per session, this directory was the sole copy of a patch.
+        if not keep_work:
+            shutil.rmtree(workdir, ignore_errors=True)
     wall_time = time.perf_counter() - wall_start
 
     usage = agent.usage if agent else None
@@ -162,12 +209,22 @@ def run_one(instance: dict, tools: list[str], run_index: int, *, provider, sessi
         crashed=crashed,
         error_type=error_type,
         error_message=error_message,
+        # agent.usage only accumulates on a successful complete() return, so a run
+        # that exhausted its retries and then raised never gets counted there —
+        # error_detail (built from the exception itself) is the only place that
+        # carries it for a failed run. Prefer whichever is non-zero so the row
+        # answers "did it retry" without needing errors/<run>.json open.
+        invalid_prompt_retries=(
+            (usage.invalid_prompt_retries if usage else 0)
+            or error_detail.get("invalid_prompt_retries", 0)
+        ),
         termination_reason=termination_reason,
         turns_used=agent.turns_used if agent else 0,
         max_turns=max_turns,
         tool_calls_breakdown=dict(usage.tool_calls) if usage else {},
         tool_call_errors=dict(usage.tool_call_errors) if usage else {},
         reasoning_effort=getattr(provider, "reasoning_effort", None) or "",
+        temperature=temperature,
         harness_sha=harness_sha,
         dataset=DATASET,
         split=swe_settings.split,
@@ -240,13 +297,19 @@ def _rollup(rows: list[RunRow]) -> dict:
 
 def run_pipeline(*, model, instances, tool_combos=None, tool_universe=None, repeats=1,
                  artifacts_dir, name=None, max_turns=None, run_timeout=None, max_workers=4,
-                 grade_enabled=True, reasoning_effort=None, selection=None):
+                 grade_enabled=True, reasoning_effort=None, temperature=None, selection=None,
+                 resume_from=None, keep_work=False):
     artifacts_dir = Path(artifacts_dir)
     swe_root = artifacts_dir / "swebench"
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    exp_id = f"{timestamp}_{name or model}"
-
-    exp_root = swe_root / "experiments" / exp_id
+    if resume_from:
+        exp_root = Path(resume_from).resolve()
+        if not exp_root.exists():
+            raise SystemExit(f"--resume: no such experiment dir: {exp_root}")
+        exp_id = exp_root.name
+    else:
+        exp_id = f"{timestamp}_{name or model}"
+        exp_root = swe_root / "experiments" / exp_id
     conv_dir = exp_root / "conversations"
     msg_dir = exp_root / "messages"
     err_dir = exp_root / "errors"
@@ -256,7 +319,13 @@ def run_pipeline(*, model, instances, tool_combos=None, tool_universe=None, repe
     for d in (conv_dir, msg_dir, err_dir, preds_dir, grade_dir, work_root):
         d.mkdir(parents=True, exist_ok=True)
 
-    provider = make_provider(settings, model=model, reasoning_effort=reasoning_effort)
+    provider = make_provider(settings, model=model, reasoning_effort=reasoning_effort,
+                             temperature=temperature)
+    # Mirrors what OpenAIProvider.complete() actually puts on the wire: nothing
+    # (API default applies) unless an explicit temperature was passed, and never
+    # alongside reasoning_effort (reasoning models reject the parameter). Recorded
+    # on the row as-is — None there means "not sent", not "sent as 0.0".
+    effective_temperature = None if reasoning_effort else temperature
     max_turns = max_turns or swe_settings.max_turns
     run_timeout = run_timeout or swe_settings.run_timeout
     harness_sha = _harness_sha()
@@ -265,23 +334,66 @@ def run_pipeline(*, model, instances, tool_combos=None, tool_universe=None, repe
         tool_combos = all_tool_combinations(tool_universe or DEFAULT_TOOLS, ("bash",))
 
     all_rows = []
+    # Resume: rows.jsonl is the record of what actually finished, keyed by run_id.
+    # Anything already in it is skipped and its row/prediction reused, so an
+    # interrupted batch continues instead of starting over.
+    done_rows: dict[str, RunRow] = {}
+    if resume_from:
+        for line in (exp_root / "rows.jsonl").read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                r = RunRow(**json.loads(line))
+                done_rows[r.run_id] = r
+        tqdm.write(f"resuming {exp_root.name}: {len(done_rows)} run(s) already done")
+
     total = len(tool_combos) * len(instances) * repeats
     pbar = tqdm(total=total, desc="swebench", unit="run")
+    pbar.update(len(done_rows))
+
+    # rows.jsonl is the metrics table everything downstream reads (cost, tokens,
+    # resolved, ...) — unlike conversations/messages/errors, which are written
+    # per-run, this used to be built up in memory and only ever hit disk once, at
+    # the very end. On a multi-hour, hundreds-of-runs batch that means a crash,
+    # Ctrl+C, or OOM anywhere before the last line throws away 100% of the table,
+    # even though every individual run's artifacts survived on disk. Checkpointed
+    # instead: a full rewrite after every run. At this scale (low thousands of rows
+    # at most) that's sub-millisecond, so there's no reason not to do it every time.
+    rows_json = exp_root / "rows.jsonl"
+
+    def _checkpoint(rows: list[RunRow]) -> None:
+        rows_json.write_text(
+            "".join(json.dumps(r.model_dump(), ensure_ascii=False) + "\n" for r in rows),
+            encoding="utf-8")
 
     for tools in tool_combos:
         session_id = make_session_id(model, tools)
+        preds_path = preds_dir / f"{session_id}.jsonl"
         session_rows, session_preds = [], []
+        if resume_from:
+            # Patches come back from the per-run predictions file, not from work/ —
+            # those checkouts are deleted as soon as the diff is extracted.
+            session_preds = predict.read_predictions(preds_path)
+            session_rows = [done_rows[k] for k in
+                            (f"{session_id}/{i['instance_id']}/{r}"
+                             for i in instances for r in range(repeats))
+                            if k in done_rows]
 
         for instance in instances:
             for run_index in range(repeats):
+                if f"{session_id}/{instance['instance_id']}/{run_index}" in done_rows:
+                    continue
                 pbar.set_postfix_str(f"{session_id} · {instance['instance_id']} · run {run_index}")
                 row, messages, prediction, error_detail = run_one(
                     instance, tools, run_index,
                     provider=provider, session_id=session_id, work_root=work_root,
                     max_turns=max_turns, run_timeout=run_timeout, harness_sha=harness_sha,
+                    temperature=effective_temperature, keep_work=keep_work,
                 )
                 session_rows.append(row)
                 session_preds.append(prediction)
+                # Written every run, not once per session: a session is 300 instances
+                # and hours long, and until this was per-run an interrupt anywhere in
+                # it threw away every patch it had produced.
+                predict.write_predictions(preds_path, session_preds)
                 run_name = f"{session_id}__{instance['instance_id']}__{run_index}"
                 (conv_dir / f"{run_name}.md").write_text(
                     _render_md(row, messages), encoding="utf-8")
@@ -299,8 +411,8 @@ def run_pipeline(*, model, instances, tool_combos=None, tool_universe=None, repe
                           f"{row.termination_reason}  {row.wall_time:.0f}s  "
                           f"${row.cost:.4f}  patch={not row.empty_patch}")
                 pbar.update(1)
+                _checkpoint(all_rows + session_rows)
 
-        preds_path = preds_dir / f"{session_id}.jsonl"
         predict.write_predictions(preds_path, session_preds)
 
         if grade_enabled:
@@ -317,24 +429,28 @@ def run_pipeline(*, model, instances, tool_combos=None, tool_universe=None, repe
                 if r:
                     for k in GRADE_FIELDS:
                         setattr(row, k, r[k])
+            _checkpoint(all_rows + session_rows)  # overwrite the ungraded snapshot
 
         all_rows.extend(session_rows)
+        _checkpoint(all_rows)
 
     pbar.close()
-
-    # per-experiment artifacts
-    rows_json = exp_root / "rows.jsonl"
-    rows_json.write_text("".join(json.dumps(r.model_dump(), ensure_ascii=False) + "\n" for r in all_rows),
-                         encoding="utf-8")
     csv_path = exp_root / "rows.csv"
     write_csv(csv_path, [r.csv_row() for r in all_rows])
 
     rollup = _rollup(all_rows)
+    # A resumed experiment keeps its original creation time — overwriting it with the
+    # resume time would lose when the data actually started being collected.
+    manifest_path = exp_root / "manifest.json"
+    created = timestamp
+    if resume_from and manifest_path.exists():
+        created = json.loads(manifest_path.read_text(encoding="utf-8")).get("created", timestamp)
     manifest = {
         "exp_id": exp_id,
         "name": name,
         "ts": time.time(),
-        "created": timestamp,
+        "created": created,
+        "resumed_at": timestamp if resume_from else None,
         "model": model,
         "dataset": DATASET,
         "split": swe_settings.split,

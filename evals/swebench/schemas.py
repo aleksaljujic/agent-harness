@@ -1,16 +1,8 @@
-"""Typed shapes for SWE-bench eval output.
-
-`RunRow` is the per-run record — the single source of truth for the CSV / JSONL
-columns described in docs/swebench/METRICS_SWE.md. `PatchInfo` is what
-`predict.extract` returns. The manifest / ledger / rollup dicts stay plain:
-they are assembled once and serialized immediately.
-"""
 import json
 from typing import TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field
 
-# outcome fields the grader backfills onto a RunRow after the agent has run
 GRADE_FIELDS = (
     "resolved",
     "tests_fail_to_pass_total", "tests_fail_to_pass_passed",
@@ -76,6 +68,11 @@ class RunRow(BaseModel):
     crashed: bool = False
     error_type: str = ""
     error_message: str = ""
+    # how many times the provider's moderation classifier rejected a prompt that was
+    # then retried unchanged and accepted; >0 means this run only completed because
+    # of the retry. Runs that retried and still failed carry the count in
+    # errors/<run>.json instead, since no row-level result exists for them.
+    invalid_prompt_retries: int = 0
     termination_reason: str = "unstarted"
     turns_used: int = 0
     max_turns: int = 0
@@ -85,7 +82,9 @@ class RunRow(BaseModel):
     tool_call_errors: dict[str, int] = Field(default_factory=dict)
 
     # provenance
-    temperature: float = 0.0
+    # None means no `temperature` kwarg was sent at all (API's own default applies) —
+    # distinct from 0.0, which means it was actually sent as zero.
+    temperature: float | None = None
     reasoning_effort: str = ""
     harness_sha: str = ""
     dataset: str = ""

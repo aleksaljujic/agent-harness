@@ -10,8 +10,8 @@ console = Console()
 class Tool:
     name: str
     args_model: Type[BaseModel]
-    definition: dict           # OpenAI function-tool schema
-    handler: Callable          # (sandbox, args) -> str
+    definition: dict           
+    handler: Callable          
 
 def run_script(sandbox, script: str, payload: dict, timeout: int | None = None) -> str:
     data = json.dumps(payload)

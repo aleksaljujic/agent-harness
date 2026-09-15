@@ -39,6 +39,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
     p.add_argument("--reasoning-effort", choices=list(REASONING_LEVELS), default=None,
                    help="enable model reasoning at this effort level")
+    p.add_argument("--temperature", type=float, default=None,
+                   help="sampling temperature; omit to not send it at all (API's own "
+                        "default applies), ignored when --reasoning-effort is set "
+                        "(reasoning models reject the parameter)")
     p.add_argument("--repeats", type=int, default=swe_settings.repeats)
     p.add_argument("--max-turns", type=int, default=None,
                    help=f"per run (default {swe_settings.max_turns})")
@@ -47,6 +51,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--max-workers", type=int, default=swe_settings.grade_max_workers,
                    help="parallelism for the swebench evaluator")
     p.add_argument("--no-grade", action="store_true", help="produce predictions only, skip evaluation")
+    p.add_argument("--resume", default=None, metavar="EXP_DIR",
+                   help="continue an interrupted experiment: reuse that directory and skip "
+                        "every run already recorded in its rows.jsonl")
+    p.add_argument("--keep-work", action="store_true",
+                   help="keep the per-run repo checkouts under artifacts/swebench/work/ "
+                        "(~80MB each) instead of deleting them once the patch is extracted")
     p.add_argument("--artifacts-dir", default=str(ROOT / "artifacts"))
     return p
 
@@ -77,7 +87,10 @@ def main() -> None:
         max_workers=args.max_workers,
         grade_enabled=not args.no_grade,
         reasoning_effort=args.reasoning_effort,
+        temperature=args.temperature,
         selection=selection,
+        resume_from=args.resume,
+        keep_work=args.keep_work,
     )
 
     summarize(rows)

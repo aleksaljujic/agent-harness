@@ -132,6 +132,7 @@ fajl opisuje **sirovi red** kakav stvarno izlazi.
 | `crashed` | `true` samo za grešku u setup-u harness-a; `api_error` **nije** `crashed`. |
 | `error_type` | ime izuzetka (`BadRequestError`, `RuntimeError`, …), inače `""`. |
 | `error_message` | jedan red sažetka prave greške (status kod + poruka sa API-ja, obrezano na ~300 karaktera). Pun detalj (status_code, request_id, `body`, `response.text`, traceback) ide u `errors/<session_id>__<instance_id>__<run_index>.json`, samo ako je nešto stvarno palo. |
+| `invalid_prompt_retries` | koliko puta je provider-ov moderation klasifikator odbio prompt (`code: "invalid_prompt"`) koji je zatim **nepromenjen** ponovo poslat i prošao. `0` = klasifikator se nije ni oglasio; `>0` = run je završen **samo zahvaljujući** retry-ju. Run koji je retry-ovao pa ipak pao nema red sa rezultatom, pa svoj broj pokušaja nosi u `errors/<run>.json` (isto ime polja). Zbirno preko ove kolone i tih fajlova dobija se odgovor na otvoreno pitanje iz [ISSUES.md](../todo/ISSUES.md) #2 — da li je flag nedeterminističan: ako retry često prolazi, jeste; ako nikad ne prolazi, sadržaj je tvrdo blokiran. |
 
 ### Ponašanje alata (poenta ablacije)
 
@@ -144,7 +145,7 @@ fajl opisuje **sirovi red** kakav stvarno izlazi.
 
 | polje | opis |
 |---|---|
-| `temperature` | sampling temperatura (0.0). |
+| `temperature` | sampling temperatura zaista poslata API-ju preko `--temperature`; `null`/prazno znači da parametar **nije poslat uopšte** (provider koristi svoj default), ne da je poslato 0.0 — to dvoje je namerno razdvojeno u koloni. Uvek `null` kad je `reasoning_effort` postavljen (reasoning modeli odbijaju ovaj parametar). |
 | `harness_sha` | `git rev-parse HEAD` harness-a u trenutku run-a — reproducibilnost. |
 | `dataset` | `SWE-bench/SWE-bench_Lite`. |
 | `split` | `test`. |

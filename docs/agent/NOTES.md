@@ -60,18 +60,28 @@ each run and `git checkout` is a two-second recovery.
 
 ## 3. Tools: fewer than expected, and mostly about output
 
-Three tools cover the space:
+The set grew from three to six (`bash`, `search`, `str_replace`, `read_file`,
+`find_file`, `run_tests` — see [TOOLS.md](TOOLS.md) for the full reference), but the
+growth didn't break the original instinct. Every addition after `search` was still
+about controlling output the model could already produce itself, not new capability:
 
 | Tool | Why it exists |
 |---|---|
 | `bash` | One tool, one parameter, the entire Linux userland |
 | `search` | `grep` with the output capped and noise directories excluded |
 | `str_replace` | Edit a file without regenerating it |
+| `read_file` | `cat -n` with validated ranges, so line numbers in an error are always addressable |
+| `find_file` | Separates "find by name" from "search by content" — one predictable output shape instead of remembering `find` flags each time |
+| `run_tests` | Structured pass/fail JSON instead of raw pytest stdout — a failing suite doesn't eat the context window one traceback at a time |
 
 `bash` alone is startlingly capable — the model composes pipes, redirects, and `&&`
 chains that no hand-designed tool list would have anticipated. The instinct to add
 twenty specialized tools is wrong; each one is another chance to choose badly, and
-another block of tokens in every single request.
+another block of tokens in every single request. The test that kept `read_file` and
+`find_file` from being scope creep: could `bash` already do this? Yes. Did the model
+reliably do it in a way that didn't waste tokens or context? No — `find` flags vary
+task to task, and unstructured `cat` output has no range-checking, so a bad
+`start_line` just silently returns nothing useful instead of an addressable error.
 
 Note what `search` actually adds. The model can already run `grep`. The value is that
 the harness controls the output: 50 hits maximum, `.git` and `node_modules` excluded.
@@ -82,7 +92,9 @@ window in one call. The tool doesn't add capability, it subtracts output.
 works line by line, so it can't touch a multi-line block; every regex metacharacter in
 the code needs escaping; and `sed -i` on a pattern that occurs five times silently
 edits all five. The implementation reads the whole file in Python, does a literal
-`str.replace`, and refuses unless the snippet appears exactly once.
+`str.replace`, and refuses unless the snippet appears exactly once (or the model
+explicitly opts into `replace_all` / a specific `occurrence` — see §4 for why that
+had to be added).
 
 Two details worth keeping:
 
@@ -99,15 +111,36 @@ This turned out to be the single most useful idea in the project.
 Every string a tool returns is an instruction about what to do next. It is not
 diagnostics for a human — the model has that sentence and nothing else.
 
-Observed directly. `str_replace` returned:
+Observed directly, twice, with opposite outcomes.
+
+The first version of the uniqueness error said:
 
 ```
 ERROR: old_str appears 2 times, must be unique. Include more surrounding lines.
 ```
 
-The model read it, ran `nl -ba` to look at the context around both occurrences, and
-sent two new calls with enough surrounding text to disambiguate each. No
-intervention.
+On a small duplicate, the model read it, ran `nl -ba` to look at the context around
+both occurrences, and sent two new calls with enough surrounding text to disambiguate
+each. No intervention needed — this was the anecdote that justified the whole "tool
+output is a prompt" idea.
+
+It stopped working the moment the duplication was real. Against `sphinx`'s
+`autodoc/__init__.py`, two ~14-line blocks (`DataDocumenter`, `AttributeDocumenter`)
+were byte-identical. "Include more surrounding lines" reads as direction-neutral
+advice, so the model kept extending the match *downward* — but the duplicate block was
+identical below too, so no amount of downward extension could ever disambiguate it.
+Twenty runs hit the same error and looped on it until `max_turns`, paying for repeated
+identical tool calls that made zero progress. A well-written error message pointed in
+a direction that could never work.
+
+The fix wasn't a better tone, it was a directionally correct one: report the line
+number of every match, and say *upward* specifically — the preceding `def`/`class`/
+comment line is where duplicated blocks actually diverge, because the duplication
+itself is what makes everything below identical. Also added `replace_all` and
+`occurrence=N` so the model has an exit that doesn't depend on finding a unique anchor
+at all. Lesson underneath the lesson: a clear error message is necessary but not
+sufficient — the advice embedded in it has to match how the failure actually occurs in
+real code, not just be clear in the abstract.
 
 Compare with what an earlier version of the sandbox returned for an empty result:
 
@@ -196,6 +229,15 @@ throughout a document, the model wrote a Python heredoc doing a global `replace(
 the correct choice. `str_replace` is for localized edits; forcing it everywhere would
 be worse.
 
+Worth flagging for anyone using this harness to *measure* a tool's effect rather than
+just to ship one: the `MUST use str_replace` sentence that makes adoption happen is
+itself a confound. An ablation that compares "`str_replace` available" against
+"`str_replace` unavailable" while that sentence is in the prompt isn't measuring
+`tool available vs. unavailable` — it's measuring `tool available + instructed to use
+it vs. unavailable`. Both are legitimate experiments; they answer different questions,
+and only one of them is "does the tool help." Getting a model to adopt a new tool and
+cleanly measuring whether that tool helps turned out to be in tension with each other.
+
 ## 8. Things that cost hours
 
 Recorded because none of them announced themselves.
@@ -241,6 +283,20 @@ path inside a container command produced
 `/home/user/.../scripts/opt/agent-scripts/str_replace.py` — two paths concatenated. The
 mount source belongs in `sandbox.py`; the mount target is what tool implementations
 use.
+
+**Keeping only `type(e).__name__` turns a diagnosable failure into an undiagnosable
+one.** A handful of SWE-bench runs failed with `BadRequestError` and nothing else —
+the exception type was logged, the response body was not. That single missing field
+made three failures across fifteen runs, non-deterministic and uncorrelated with
+payload size, look unexplainable for days: not reproducible, not obviously a bug, no
+lead to chase. The fix was mechanical — catch the exception, keep `status_code`,
+`request_id`, `body`, and `response.text` alongside the type name — and the very next
+occurrence resolved in one read: `code: "invalid_prompt"`, the provider's own
+content-moderation classifier flagging a benign stack trace as a false positive.
+Nothing about the failure changed; only how much of it was kept. The general shape:
+when an exception crosses a provider/process boundary, whatever isn't captured at that
+boundary is gone for good — there's no retrying your way back to a body you didn't
+save.
 
 ## 9. Model behaviour worth noting
 

@@ -11,6 +11,7 @@ class CompletionResult(BaseModel):
     tool_calls: list[ToolCall] = []
     usage: tuple[int, int]
     reasoning_tokens: int = 0
+    invalid_prompt_retries: int = 0
     assistant_message: dict = {}
     raw_message: object = None
     latency: float | None = None

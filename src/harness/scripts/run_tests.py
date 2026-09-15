@@ -1,7 +1,7 @@
 import json, sys, os, subprocess, tempfile
 import xml.etree.ElementTree as ET
 
-PYTEST_TIMEOUT = 280  # a bit under the docker-exec timeout the handler asks for
+PYTEST_TIMEOUT = 280
 
 def main():
     try:
@@ -29,8 +29,6 @@ def main():
         os.unlink(xml_path)
         return json.dumps({"error": f"pytest timed out after {PYTEST_TIMEOUT}s"})
 
-    # 0 = all passed, 1 = some failed -> normal, parse xml.
-    # 2/3/4 = collection/usage/internal error, 5 = nothing collected.
     try:
         has_xml = os.path.getsize(xml_path) > 0
     except OSError:

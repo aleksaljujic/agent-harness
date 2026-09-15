@@ -6,6 +6,7 @@ from harness.config import settings, MODEL_PRICING
 from pydantic import BaseModel, computed_field
 from harness.providers import make_provider
 from harness.providers.base import ToolCall
+import threading
 import time
 
 provider = make_provider(settings)
@@ -20,6 +21,7 @@ class Usage(BaseModel):
     tool_time_seconds: float = 0.0
     tool_calls: dict[str, int] = {}
     tool_call_errors: dict[str, int] = {}
+    invalid_prompt_retries: int = 0
     
     @computed_field
     @property
@@ -41,6 +43,12 @@ class Agent:
         self.usage: Usage = Usage(model = self.provider.model)
         self.termination_reason: str = "unstarted"
         self.turns_used: int = 0
+        # Cooperative cancellation. A caller that bounds run() with a wall-clock
+        # timeout (see evals/swebench/pipeline.py::_run_agent_bounded) can only
+        # abandon the thread, not kill it — without this the abandoned thread keeps
+        # calling the model and dispatching tools against an already-destroyed
+        # sandbox, spending money nothing ever reads back.
+        self.stop = threading.Event()
         self.messages = [
             {
                 "role": "system",
@@ -55,6 +63,9 @@ class Agent:
         })
         
         for turn in range(self.max_turns):
+            if self.stop.is_set():
+                self.termination_reason = "stopped"
+                return "Stopped"
             self.turns_used = turn + 1
 
             t0 = time.perf_counter()
@@ -67,6 +78,7 @@ class Agent:
             self.usage.prompt += prompt_tokens
             self.usage.completion += completion_tokens
             self.usage.reasoning += result.reasoning_tokens
+            self.usage.invalid_prompt_retries += result.invalid_prompt_retries
             self.usage.calls += 1
 
             self.messages.append(result.assistant_message)
@@ -76,6 +88,11 @@ class Agent:
                 return result.content
 
             for call in result.tool_calls:
+                # Re-checked per call, not just per turn: one turn can carry several
+                # tool calls and run long past the timeout on its own.
+                if self.stop.is_set():
+                    self.termination_reason = "stopped"
+                    return "Stopped"
                 t0 = time.perf_counter()
                 out = self._dispatch(call)
                 self.usage.tool_time_seconds += time.perf_counter() - t0

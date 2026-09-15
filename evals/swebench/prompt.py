@@ -5,8 +5,10 @@ SWEBENCH_SYSTEM = (
     "smallest change to the source that resolves the issue.\n"
     "Do NOT edit, add, or delete tests — the change is graded against a hidden "
     "test suite.\n"
-    "When modifying an existing file you MUST use str_replace (if available), "
-    "one call per change; do not rewrite whole files with cat.\n"
+    # Deliberately says nothing about which edit tool to prefer, and does not
+    # discourage rewriting a file with cat. Any such nudge makes the toolset
+    # ablation measure "tool + instruction to use it" rather than "tool" — the
+    # thesis' main hypothesis. Keep identical across all toolset conditions.
     "Each bash command is self-contained; chain with && since state does not "
     "carry between calls. There is no network access.\n"
     "Stop when the fix is complete — do not narrate a summary."
