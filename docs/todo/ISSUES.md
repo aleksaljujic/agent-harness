@@ -265,6 +265,16 @@ To do:
   timeout #6 identified, since this one didn't seem to hit any timeout at
   all in 12+ minutes.
 
+**Update (2026-09-16) — likely not a bug, just a slow cold pull.** The same
+`run_instance.log` continues past the "stuck" line: `15:16:40 Creating
+container...`, `Test runtime: 7.22 seconds`, a real `report`, and the
+container removed at `15:17:03`. So the pull *finished* after ~12.5 min and
+grading produced a verdict — the processes were apparently killed after (or
+just as) it completed. "Created ~4 weeks ago" in `docker images` is the
+image's **build** date on the registry, not when it was pulled locally, so it
+was never evidence that the image was present before 15:04. Still worth one
+re-grade to confirm, but treat this as #6 (slow pull), not a detection bug.
+
 ## [ ] 9. `repeats > 1` silently drops all but the last repeat's grade — root cause confirmed
 
 Surfaced during external review of the experimental protocol (see
