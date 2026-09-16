@@ -63,7 +63,7 @@ Docker Desktop moraju ostati upaljeni:
 ## 1. Setup repoa (u Ubuntu terminalu)
 
 ```bash
-sudo apt update && sudo apt install -y git tmux
+sudo apt update && sudo apt install -y git tmux   # proveriti: `tmux -V` mora ispisati verziju
 curl -LsSf https://astral.sh/uv/install.sh | sh
 source ~/.local/bin/env
 
@@ -119,25 +119,60 @@ Pre toga proveriti slobodan prostor na particiji iz koraka 0.2 (Windows
 Explorer → This PC). `df` u WSL-u ne pokazuje prostor koji Docker Desktop
 stvarno ima.
 
+> **Kopiranje kroz AnyDesk:** tekst nalepljen sa Windows-a može da donese Windows
+> krajeve redova (`\r`). Tada `docker pull` javlja `invalid reference format`.
+> Zato su komande ispod jednolinijske, a `sed` na kraju briše `\r` ako se pojavi.
+> Blokove lepiti **red po red**, ne ceo blok odjednom.
+
+**3a. Lista image-a** (obična Ubuntu konzola):
+
 ```bash
 cd ~/agent-harness
-docker login        # besplatan Docker Hub nalog: 300 pull-ova probija limit za anonimne
-
-E=artifacts/swebench/experiments/20260915_120759_batch_300
-python3 -c "
-import json
-for l in open('$E/predictions/gpt-5.4-nano__bash.jsonl'):
-    i = json.loads(l)['instance_id'].replace('__', '_1776_').lower()
-    print(f'swebench/sweb.eval.x86_64.{i}:latest')
-" > images.txt
-wc -l images.txt                                   # 300
-
-tmux new -s pull
-xargs -P 4 -n 1 docker pull < images.txt 2>&1 | tee pull.log
+docker login
 ```
 
-Provera da je svih 300 tu. Ako fali neki, ponoviti isti `xargs`: već skinuti se
-preskaču za par sekundi.
+`docker login` traži besplatan Docker Hub nalog, jer 300 pull-ova probija limit
+za anonimne korisnike.
+
+```bash
+python3 -c "import json; [print('swebench/sweb.eval.x86_64.' + json.loads(l)['instance_id'].replace('__', '_1776_').lower() + ':latest') for l in open('artifacts/swebench/experiments/20260915_120759_batch_300/predictions/gpt-5.4-nano__bash.jsonl')]" > images.txt
+```
+
+```bash
+sed -i 's/\r$//' images.txt
+```
+
+```bash
+wc -l images.txt
+```
+
+Mora pisati `300 images.txt`.
+
+```bash
+head -2 images.txt | cat -A
+```
+
+Svaki red mora da se završava sa `:latest$`. Ako se završava sa `:latest^M$`,
+ponoviti `sed` komandu.
+
+**3b. Pull u `tmux`-u.** Prvo otvoriti sesiju:
+
+```bash
+tmux new -s pull
+```
+
+Otvara se novi, prazan terminal (zelena traka dole). **Tek u njemu** pokrenuti:
+
+```bash
+cd ~/agent-harness
+```
+
+```bash
+xargs -r -P 4 -n 1 docker pull < images.txt 2>&1 | tee pull.log
+```
+
+Na kraju proveriti da je svih 300 tu. Ako neki fali, ponoviti isti `xargs`: već
+skinuti image-i se preskaču za par sekundi.
 
 ```bash
 while read img; do docker image inspect "$img" >/dev/null 2>&1 || echo "FALI $img"; done < images.txt
@@ -152,18 +187,17 @@ Pokrenuti u `tmux`-u. Tako proces nastavlja i ako se zatvori Ubuntu prozor ili
 AnyDesk sesija.
 
 ```bash
-cd ~/agent-harness
 tmux new -s grade
+```
 
-uv run scripts/run_swebench.py \
-    --limit 300 \
-    --combo bash \
-    --combo bash,str_replace \
-    --combo bash,find_file,read_file,search \
-    --combo bash,find_file,read_file,search,str_replace \
-    --max-workers 8 \
-    --resume artifacts/swebench/experiments/20260915_120759_batch_300 \
-    2>&1 | tee grade.log
+U novom `tmux` terminalu:
+
+```bash
+cd ~/agent-harness
+```
+
+```bash
+uv run scripts/run_swebench.py --limit 300 --combo bash --combo bash,str_replace --combo bash,find_file,read_file,search --combo bash,find_file,read_file,search,str_replace --max-workers 8 --resume artifacts/swebench/experiments/20260915_120759_batch_300 2>&1 | tee grade.log
 ```
 
 - `--limit 300` i četiri `--combo` moraju biti **tačno** ovakvi, jer tako
