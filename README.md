@@ -19,9 +19,9 @@ cp .env.example .env
 Fill in `.env`:
 
 ```
-AZURE_OPENAI_ENDPOINT=https://your-resource.services.ai.azure.com/openai/v1
-AZURE_OPENAI_API_KEY=your-key
-AZURE_OPENAI_DEPLOYMENT=your-deployment-name
+ENDPOINT=https://your-resource.services.ai.azure.com/openai/v1
+API_KEY=your-key
+DEPLOYMENT=your-deployment-name
 ```
 
 `AZURE_OPENAI_DEPLOYMENT` is the deployment name from the Azure portal, not the model

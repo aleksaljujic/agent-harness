@@ -332,8 +332,6 @@ In order of expected value:
 
 1. **Context compaction.** `messages` grows without bound; long tasks will hit the
    limit mid-run. Summarize older turns, keep the last N verbatim.
-2. **Retry on 429.** Azure rate-limits per deployment by TPM. Exponential backoff, ten
-   lines.
 3. **Repeat detection.** The same call with the same arguments three times means stuck.
    Break, or return a different message so the loop has something new to react to.
 4. **A held-out eval set.** The current nine tasks are the ones the system was tuned
