@@ -1,8 +1,7 @@
-import shlex
 from typing import Optional
 from pydantic import BaseModel
 from rich.panel import Panel
-from harness.tools.base import Tool, console
+from harness.tools.base import Tool, run_script, console
 
 class SearchArgs(BaseModel):
     pattern: str
@@ -12,12 +11,20 @@ DEFINITION = {
     "type": "function",
     "function": {
         "name": "search",
-        "description": "Search files by regex. Returns path:line:content, max 50 hits.",
+        "description": (
+            "Search file contents by extended regex (grep -E). Returns path:line:content, "
+            "capped at 50 hits; when capped, a last line gives the total. glob optionally "
+            "limits which files are searched: a filename glob (*.py), a path glob matched "
+            "like find_file (sympy/**/*.py), or a file or directory path (sympy/core)."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
-                "pattern": {"type": "string"},
-                "glob": {"type": "string", "description": "e.g. *.py, optional"},
+                "pattern": {"type": "string", "description": "Extended regex"},
+                "glob": {
+                    "type": "string",
+                    "description": "Optional: *.py, sympy/**/*.py, or a file/directory path",
+                },
             },
             "required": ["pattern"],
         },
@@ -28,22 +35,9 @@ def handler(sandbox, args: SearchArgs) -> str:
     label = f"{args.pattern}" + (f"  ({args.glob})" if args.glob else "")
     console.print(Panel(label, title="search", border_style="magenta", title_align="left"))
 
-    # --include is a basename glob, so it never matches a glob containing "/"
-    # (e.g. a full file path); in that case search within that path instead.
-    include, target = "", "."
+    payload = {"pattern": args.pattern}
     if args.glob:
-        if "/" in args.glob:
-            target = shlex.quote(args.glob)
-        else:
-            include = f"--include={shlex.quote(args.glob)}"
-
-    cmd = (
-        f"grep -rn {include} --exclude-dir=.git --exclude-dir=node_modules "
-        f"-E {shlex.quote(args.pattern)} {target} | head -50"
-    )
-    out = sandbox.run(cmd).strip()
-    if not out or out.startswith("Without return") or out.startswith("(no output)"):
-        return "No matches."
-    return out
+        payload["glob"] = args.glob
+    return run_script(sandbox, "search.py", payload)
 
 TOOL = Tool("search", SearchArgs, DEFINITION, handler)
