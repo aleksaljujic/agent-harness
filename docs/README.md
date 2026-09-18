@@ -23,6 +23,8 @@
 - [`METRICS.md`](swebench/METRICS.md) — per-run result-row schema and the aggregate metrics for the tool-ablation experiment.
 - [`METRICS_SWE.md`](swebench/METRICS_SWE.md) — field-by-field objašnjenje sirovog reda iz `artifacts/swebench/` i razlike u odnosu na stari `evals` runner.
 - [`GRADE_BATCH_300.md`](swebench/GRADE_BATCH_300.md) — korak-po-korak ocenjivanje `batch_300` na drugom računaru, Windows/WSL2 preko AnyDesk-a (pre-pull image-a, `--resume` bez API troška, provera `grade_error`).
+- [`REEVALUACIJA_IZMENE.md`](swebench/REEVALUACIJA_IZMENE.md) — materijal za pisanje rada posle ponovljene evaluacije: nove slike (`docs/media/reeval/`), svi brojevi staro → novo i izmene po odeljcima `Diplomski rad.tex`.
+- [`PLAN_REEVALUACIJA.md`](swebench/PLAN_REEVALUACIJA.md) — ponovljeni uslovi C i D sa ispravljenim `search`-om: dva plana za rad (dopunska analiza ili kombinovani eksperiment kao glavni), zajednički preduslovi i spajanje podataka.
 - [`AUDIT_REPORT.md`](swebench/AUDIT_REPORT.md) — static integrity audit of the harness against the SWE-bench protocol (test-patch timing, git-history exposure, isolation, timeouts).
 
 ## research/

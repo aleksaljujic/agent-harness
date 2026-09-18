@@ -1,0 +1,23 @@
+%%{init: {"themeVariables": {"fontSize": "18px"}, "flowchart": {"wrappingWidth": 420, "nodeSpacing": 30, "rankSpacing": 45}}}%%
+flowchart TB
+    ds[("SWE-bench Lite · 300 задатака")]
+
+    prep["<b>1. Припрема репозиторијума</b><br/>repo @ base_commit<br/>историја сведена на један commit"]
+
+    agent["<b>2. Рад агента</b><br/>исти задатак, нови checkout по услову"]
+
+    A["<b>А</b><br/>bash"]
+    B["<b>Б</b><br/>bash<br/>str_replace"]
+    C["<b>В</b><br/>bash<br/>search · read_file<br/>find_file"]
+    G["<b>Г</b><br/>сви алати"]
+
+    patch["<b>3. Издвајање исправке</b><br/>git add -A && git diff --cached"]
+    grade["<b>4. Званична SWE-bench евалуација</b><br/>закрпа у Docker слици задатка<br/>FAIL_TO_PASS и PASS_TO_PASS тестови"]
+    metrics[["<b>5. Мере</b><br/>решено · трошак · трошак по решеном<br/>токени · кораци · локализација"]]
+
+    ds --> prep
+    prep --> agent
+    agent --> A & B & C & G
+    A & B & C & G --> patch
+    patch -- "predictions.jsonl" --> grade
+    grade -- "resolved / grade_error" --> metrics

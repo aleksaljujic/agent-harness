@@ -1,0 +1,29 @@
+%%{init: {"flowchart": {"wrappingWidth": 360, "nodeSpacing": 60, "rankSpacing": 70}}}%%
+flowchart TB
+    llm["<b>Језички модел</b><br/>Azure OpenAI API"]
+
+    subgraph H["Харнес (хост)"]
+        reg["<b>Регистар алата</b><br/>bash · str_replace · search<br/>read_file · find_file"]
+        cond{{"<b>Скуп алата — услов А–Г</b><br/><i>get_active_tools(enabled)</i>"}}
+        loop["<b>Петља агента</b><br/>историја порука<br/>(почиње описом задатка)"]
+        val["<b>Провера аргумената</b><br/>Pydantic модел"]
+        tel[("<b>Телеметрија</b><br/>токени · трошак · кораци<br/>позиви и грешке по алату")]
+    end
+
+    subgraph D["Docker контејнер (без мреже)"]
+        repo[("/work<br/>репозиторијум @ base_commit")]
+    end
+
+    rows[["rows.jsonl"]]
+
+    llm <-- "историја + шеме алата ⇄ одговор модела" --> loop
+    reg --> cond
+    cond -- "шеме активних алата" --> loop
+    loop -- "позив алата" --> val
+    loop -. "бележи" .-> tel
+    val -- "docker exec" --> repo
+    repo -- "излаз (≤ 8 000 знакова)" --> loop
+    tel --> rows
+
+    classDef hl fill:#fff3cd,stroke:#d39e00,stroke-width:2px,color:#000
+    class cond hl

@@ -22,8 +22,7 @@ def main():
 
     lines = src.splitlines()
     total = len(lines)
-    # Checked before the range: with no lines, the default range 1..0 would
-    # otherwise fail as "start_line 1 is after end_line 0".
+    # Before the range check, which would reject 1..0 on an empty file.
     if total == 0:
         return f"OK: {path} is empty"
 

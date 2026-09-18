@@ -410,3 +410,180 @@ separate change. The two smaller items below are also still open.
   turns/API calls were already spent, not before. Worth a one-time check of
   the model→pricing mapping before a large batch (e.g. the planned
   mini/nano × reasoning sweep), not something to discover mid-run.
+## [ ] 11. `search` fails on path globs (`sympy/**/*.py`) — ~53% of `search` calls in `batch_300` returned a grep error
+
+Found 2026-09-17 while checking the thesis against the project. The tool itself
+is fixed (uncommitted, see **Status**), but `20260915_120759_batch_300` ran with
+the broken version, so its search-group conditions (C/В and D/Г) are confounded
+by it.
+
+**Symptom:** 4 186 of 7 937 `search` calls in `batch_300` returned
+`grep: <glob>: No such file or directory` and no hits — 1 938 of 3 921 in
+`bash+search+read_file+find_file`, 2 248 of 4 016 in the all-tools condition,
+touching 288/300 and 286/300 runs. Every one of them had a `glob` containing
+both `/` and a wildcard (`sympy/**/*.py`, `doc/**`, `**/*`).
+
+**Root cause:** the #3 fix above sends any `/`-containing glob to grep as the
+search *target* (`grep ... 'sympy/**/*.py'`). That fixes a plain path
+(`sphinx/ext/autodoc/__init__.py`) but not a path glob: `shlex.quote` keeps the
+shell from expanding it (and bash has no `globstar` anyway), so grep looks for a
+file literally named `sympy/**/*.py`. Before #3 the same glob went to
+`--include` and silently matched nothing, so path globs never worked in either
+version. Only the full-path case was tested when #3 shipped.
+
+The model reached for that form because the `find_file` description gives
+`src/**/test_*.py` as its example, while `search`'s only says `e.g. *.py`. And
+"No such file or directory" reads like a wrong directory rather than an
+unsupported glob, so it rarely recovered. Of the calls right after a failed
+search: 63% were another failing search, 18% `bash`, 15% a corrected search,
+4% `find_file`, 1% `read_file`.
+
+**Why nothing flagged it:** `Agent.run()` counts a tool error only when the
+output starts with `ERROR` / `Unknown tool`. `search` returned raw grep
+stderr, so `tool_call_errors` shows `search: 0` for the whole batch, and
+`docs/swebench/H2.md` turned that into "search and find_file returned no errors
+in 8 467 calls". Other grep failures were invisible the same way: 134 invalid
+regexes and ~25 patterns starting with `-` that grep parsed as options.
+
+**Measured association in `batch_300`** (observational, not causal — longer
+runs have more of everything):
+- failed searches are 24.5% (C) / 30.3% (D) of all tool calls, about 6.5 / 7.5
+  per task — roughly 60% / 85% of the extra tool calls C has over A and D over
+  B;
+- runs that hit `max_turns` averaged 10.3 (C) / 16.2 (D) failed searches, vs
+  5.8 / 5.5 in the others.
+
+**What it affects:** H2 (search-group effect on cost and localization) most,
+H3 (B vs D) partly, H1 (str_replace effect within rows) least. The measured
+numbers and pre-registered decisions are correct for the tool surface as run,
+but they describe *this* search implementation, not search tools in general.
+The thesis states the bug in its limitations; it does not quantify it.
+
+**Status: tool fixed, not committed.**
+- `src/harness/tools/search.py` is now a thin wrapper; the logic moved to
+  `src/harness/scripts/search.py`. A `glob` with `/` and no wildcard is a
+  file/directory path (missing → `ERROR: path not found`). Any other glob
+  selects files with the same `fnmatch` rule as `find_file`, and grep gets
+  that file list in batches. The pattern is passed with `-e` (so a leading
+  `-` is safe), a grep error comes back as `ERROR: ...`, `/work/` and `./`
+  prefixes are stripped, binary files are skipped (`-I`), and results over 50
+  end with `... (truncated, showing first 50 of N matches; ...)`. Checked in
+  the `agent-sandbox` image against the failing globs and the edge cases
+  above.
+- Fixed in the same pass: `src/harness/scripts/read_file.py` returned
+  `ERROR: start_line 1 is after end_line 0` for an empty file (the "is empty"
+  branch was unreachable), and `start_line` past EOF with no `end_line`
+  reported "after end_line N" instead of "beyond end of file (N lines)". Not
+  hit in `batch_300` (its 15 `read_file` errors are other cases).
+- The new `search` description is longer, so the 43-token schema figure in
+  `docs/agent/TOOLS.md` and the thesis only holds for the `batch_300` version.
+
+**Still open:**
+- [x] Before committing/pushing the fix, tag the current tool version (e.g.
+  `batch-300` on `3e3dc79`) — the thesis points readers to `main` for the tool
+  schemas used in the experiment. Done 2026-09-17: tag `batch-300` → `3e3dc79`
+  is on GitHub, the fix is `628978d` on `main`.
+- [ ] `docs/swebench/H2.md:133,178` and `docs/swebench/ZAKLJUCAK.md:77` still
+  claim zero search errors / "search tools work correctly" — contradicts the
+  data and the submitted thesis.
+- [ ] `docs/agent/TOOLS.md` describes the old `search` / `read_file` behavior.
+- [ ] Error counting: consider treating a `grep:` / `Error :` prefix (bash
+  timeout) as an error too, or better, have every tool return `ERROR:` on
+  failure, so `tool_call_errors` can't read 0 while a tool fails half the time.
+  Partly done: the fixed `search` returns `ERROR: ...` (counted). `bash` stderr
+  and timeouts are still not counted.
+- [ ] Re-run only C and D (600 runs, ~$20 at `batch_300` cost) with the fixed
+  `search`. **In progress 2026-09-17** as `*_batch_300_search_fix` on the
+  Windows/WSL2 machine; see #12 for what differs and
+  `docs/swebench/PLAN_REEVALUACIJA.md` for how it enters the thesis. Same design, one tool changed buggy → working — gives a clean
+  measurement of how much the defect moved H2/H3. H2 needs no grading
+  (cost + localization), so a subset run can answer it quickly.
+- [ ] Add a unit test for `search` globs once #5 (`tests/`) exists: plain
+  `*.py`, path glob, `**/*`, existing/missing path, pattern starting with `-`,
+  invalid regex.
+
+**Related, seen in the same transcripts:**
+- 5 grades with `infra_failure_reason: missing_module` (D 2, C 2, A 1) were
+  caused by the agent, not the evaluator: its patch added stub
+  `mpmath/__init__.py` / `distutils/` at the repo root to get imports working in
+  the dependency-less sandbox, and those shadow the real modules in the eval
+  image. 34–54% of the agent's `python`/`pytest` invocations (by condition) hit
+  `ModuleNotFoundError`. Worth excluding new top-level packages from the
+  extracted patch, or at least flagging them.
+- The model invoked `apply_patch` (not a tool here) through `bash` in 280 / 185
+  / 264 / 45 runs (A/B/C/D).
+
+## [ ] 12. C/D re-run (`batch_300_search_fix`) — provisioning failures and sandbox-image drift
+
+Found 2026-09-17 while re-running C and D on the Windows/WSL2 machine (#11).
+None of this changes what the agent sees *if* the points below are respected,
+but each one either crashed the run or would have quietly changed the
+environment between `batch_300` and the re-run.
+
+**1. `git fetch` against GitHub on every run.** `provision._mirror` fetches the
+cached bare mirror before each checkout. After a burst of failed attempts
+(parallel processes, see 2) every fetch failed with exit 128 in 0 s, even from
+a single process with a complete cache. `_run_with_progress` drops git's stderr
+(it only reads progress lines), so the real reason was never logged. Each
+failure became a `crash` row, and `--resume` counts `crash` rows as done, so a
+resumed run would silently skip them.
+
+Worked around on the remote machine only, **not committed**:
+`evals/swebench/steps/provision.py` `_mirror` returns early when the mirror
+exists (`if dest.exists(): return dest`), and each mirror's
+`remote.origin.url` was pointed at itself. Behavior-neutral for the agent (same
+`base_commit`, same one-commit checkout), but rows still say
+`harness_sha: 628978d`, which does not reflect the patched file.
+
+To do:
+- [ ] Fetch only when needed: `git --git-dir <mirror> cat-file -e <base_commit>`
+  before fetching; skip the network otherwise.
+- [ ] Include git's stderr in the `RuntimeError` from `_run_with_progress`.
+- [ ] `--resume` should re-run `crash` rows instead of treating them as done.
+- [ ] Record a dirty-tree flag (or `git status --porcelain` hash) next to
+  `harness_sha` — same provenance gap as `EXPERIMENT_LOCK.md` §4.
+
+**2. Parallel processes share one repo cache.** `REPO_CACHE_DIR` is
+`Path.home()/.cache/agent-harness/repos`, so concurrent processes fetch into
+the same mirror. Workaround tried: one `HOME` per process with a copied cache —
+it failed because the caches were copied while the first `_mirror` warm-up was
+still cloning (partial copies of every repo except astropy). With fetch skipped
+(1), processes only read the cache and can share it.
+
+**3. `/mnt/c` on WSL2.** Running from the Windows drive gave
+`fatal: unable to get current working directory` from git under concurrent
+load, and ~40 s of per-run overhead (`wall_time − llm_seconds − tool_seconds`)
+vs ~3 s on the laptop. Run from the Linux home (`~`), never from `/mnt/c`.
+
+**4. Sandbox image is not reproducible from the repo.** The current `Dockerfile`
+installs `ripgrep`, but the `agent-sandbox` image that produced `batch_300`
+(`b68fe1cfc70e`, built 2026-08-25, before `ripgrep` was added in `2bd7fbe`) has
+no `rg` — which is why `batch_300` transcripts show `rg: command not found` (C
+14%, D 8% of runs tried it). A fresh `docker build` therefore gives the re-run a
+working `rg`, a second change next to `search`. The base image is also
+unpinned (`python:3.12-slim`; `batch_300` had Python 3.12.14).
+
+**Measured, 2026-09-18: no effect.** The re-run went ahead with the fresh image
+(`d4b5b67a06df`, `rg` present). Counting `rg` invocations in `messages/*.json`:
+**0 of 300 runs in C and 0 of 300 in D** called it, 0 calls total. The same
+detector on `batch_300` finds it in 86/300 (A), 70/300 (B), 43/300 (C) and
+25/300 (D) runs, so it is not a detector artifact — with a working `search` the
+model never fell back to `rg`. The image difference therefore did not affect
+the re-run; the thesis can still say only `search` changed, with a footnote
+that the sandbox image was newer and shipped `ripgrep`, unused.
+
+To do:
+- [ ] Pin the base image by digest and record the sandbox image ID in
+  `manifest.json` / `RunRow` — the mismatch was only harmless by luck.
+- [ ] Rebuild the laptop image (it is older than the repo's `Dockerfile`), or
+  document that `batch_300` ran on `b68fe1cfc70e` without `ripgrep`.
+
+**5. `--resume` + per-session checkpoint truncates `rows.jsonl` mid-run.**
+`run_pipeline` rewrites the whole file from `all_rows + session_rows` after each
+run (`pipeline.py:363`). On a resumed grading pass the first session's
+checkpoint writes only that session's 300 rows, so the other 300 exist solely in
+memory until their own session is graded. Observed during the re-run's grading:
+`rows.jsonl` dropped to 300 rows for ~20 minutes. Killing the process in that
+window would lose the other condition's metrics (predictions and transcripts
+survive). Fix: seed `all_rows` from `done_rows` when resuming, or append instead
+of rewriting.

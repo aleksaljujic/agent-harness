@@ -128,7 +128,7 @@ different tool combinations to measure their effect. `settings.enabled_tools`
 is validated against `REGISTRY` at config-load time, so an unknown tool name
 in `.env` fails fast.
 
-`bash` and `search` are pure `sandbox.run()` wrappers; `str_replace`,
+`bash` is a pure `sandbox.run()` wrapper; `search`, `str_replace`,
 `read_file`, `find_file`, `run_tests` shell out to a same-named script in
 `src/harness/scripts/` via `run_script()`. Adding a new tool means: a module in
 `tools/` with `TOOL = Tool(...)`, an entry in `tools/__init__.py`'s `_TOOLS`
@@ -139,9 +139,13 @@ Tool-specific notes that matter for correctness, not just behavior:
   uniqueness check *is* the safety property — see NOTES.md §3); `replace_all`
   and `occurrence` exist so the model can resolve an ambiguous match without
   guessing a longer anchor.
-- `search`'s `glob` arg is passed to `grep --include` (a basename glob) unless
-  it contains `/`, in which case it's used as grep's search target instead —
-  `--include` never matches a path containing a slash.
+- `search`'s `glob` arg is a file or directory path when it contains `/` and no
+  wildcard (missing path → `ERROR`); otherwise it selects files with the same
+  `fnmatch` rule as `find_file`, so path globs like `sympy/**/*.py` work. The
+  file list goes to grep explicitly — neither `--include` (basename only) nor
+  passing the glob as a literal target can express a path glob. `batch_300`
+  ran with the old version, where such globs returned grep's "No such file or
+  directory" in ~53% of `search` calls.
 - `run_tests` overrides the sandbox's default 60s timeout with its own 300s
   (`DOCKER_EXEC_TIMEOUT`) since pytest runs can be slow.
 

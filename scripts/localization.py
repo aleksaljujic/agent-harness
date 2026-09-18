@@ -66,8 +66,7 @@ def main() -> None:
     rows = [json.loads(line) for line in
             (exp_dir / "rows.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
 
-    # (session_id, instance_id) -> patch. With repeats>1 a session file carries several
-    # lines per instance and there is no run_index to tell them apart (ISSUES #9).
+    # (session_id, instance_id) -> patch; ambiguous with repeats>1 (ISSUES #9).
     patches: dict[tuple[str, str], str] = {}
     for path in sorted((exp_dir / "predictions").glob("*.jsonl")):
         for line in path.read_text(encoding="utf-8").splitlines():

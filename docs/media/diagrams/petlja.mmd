@@ -1,0 +1,20 @@
+%%{init: {"flowchart": {"wrappingWidth": 360, "nodeSpacing": 40, "rankSpacing": 35}}}%%
+flowchart TD
+    start(["Системски промпт + опис задатка"]) --> llm
+    llm["<b>Позив модела</b><br/>историја + шеме активних алата"] --> resp{"Позив алата<br/>у одговору?"}
+    resp -- "не" --> done(["Крај: <b>completed</b>"])
+    resp -- "да" --> valid{"Алат постоји,<br/>аргументи исправни?"}
+    valid -- "не" --> err["Резултат: <i>ERROR: …</i>"]
+    valid -- "да" --> exec["Извршавање у контејнеру (docker exec)<br/>резултат: излаз, највише 8 000 знакова"]
+    err --> append["Резултат се додаје у историју (порука <i>tool</i>)"]
+    exec --> append
+    append --> more{"Још позива<br/>у одговору?"}
+    more -- "да" --> valid
+    more -- "не" --> turns{"Достигнут<br/>max_turns?"}
+    turns -- "не" --> llm
+    turns -- "да" --> limit(["Крај: <b>max_turns</b>"])
+
+    classDef term fill:#e8f0fe,stroke:#1a73e8,color:#000
+    classDef errc fill:#fdecea,stroke:#d93025,color:#000
+    class done,limit term
+    class err errc

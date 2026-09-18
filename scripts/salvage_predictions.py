@@ -53,8 +53,7 @@ def main() -> None:
         for inst_dir in sorted(p for p in session_dir.iterdir() if p.is_dir()):
             for run_dir in sorted(p for p in inst_dir.iterdir() if p.is_dir()):
                 run_id = f"{session_id}/{inst_dir.name}/{run_dir.name}"
-                # No row means the run never finished — on a live batch that is the
-                # one currently executing, so leave its checkout alone.
+                # No row: run still in progress, leave it alone.
                 if run_id not in by_run:
                     skipped += 1
                     continue
@@ -76,9 +75,7 @@ def main() -> None:
 
     for session_id, recs in sorted(recovered.items()):
         path = exp_dir / "predictions" / f"{session_id}.jsonl"
-        # Merge, never overwrite: with --prune the checkouts behind earlier records
-        # are already gone, so a plain rewrite would silently shrink the file each
-        # time this is run.
+        # Merge, not overwrite: pruned checkouts can't be recovered.
         existing = {r["instance_id"]: r for r in predict.read_predictions(path)}
         added = sum(1 for r in recs if r["instance_id"] not in existing)
         existing.update({r["instance_id"]: r for r in recs})

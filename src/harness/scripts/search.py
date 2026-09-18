@@ -16,9 +16,7 @@ def normalize(glob):
 
 
 def files_matching(glob):
-    # Same rule as find_file.py, so any glob that works there works here too.
-    # A path glob like sympy/**/*.py cannot go to grep --include (basename only)
-    # or be passed as a literal path (grep gets "sympy/**/*.py", which does not exist).
+    # Same rule as find_file.py; grep --include only matches basenames.
     out = []
     for root, dirs, files in os.walk("."):
         dirs[:] = sorted(d for d in dirs if d not in EXCLUDE_DIRS)
@@ -49,8 +47,7 @@ def grep(pattern, targets):
             rc = p.wait()
             err.seek(0)
             msg = err.read().strip()
-        # -s silences unreadable-file noise, so any stderr left on exit 2 is real
-        # (e.g. an invalid regex) and would repeat for every batch.
+        # -s hides unreadable-file noise; remaining stderr is a real error
         if rc == 2 and msg:
             return hits, total, msg
     return hits, total, None

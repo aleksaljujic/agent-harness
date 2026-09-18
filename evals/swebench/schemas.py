@@ -46,8 +46,7 @@ class RunRow(BaseModel):
     tests_pass_to_pass_total: int = 0
     tests_pass_to_pass_passed: int = 0
     resolved: bool = False
-    # why the evaluator produced no verdict; "" when it actually graded.
-    # Without this a never-graded run is indistinguishable from a failed one.
+    # why the evaluator produced no verdict; "" when it actually graded
     grade_error: str = ""
     empty_patch: bool = True
     patch_applied: bool = False
@@ -68,10 +67,7 @@ class RunRow(BaseModel):
     crashed: bool = False
     error_type: str = ""
     error_message: str = ""
-    # how many times the provider's moderation classifier rejected a prompt that was
-    # then retried unchanged and accepted; >0 means this run only completed because
-    # of the retry. Runs that retried and still failed carry the count in
-    # errors/<run>.json instead, since no row-level result exists for them.
+    # invalid_prompt retries before the request was accepted
     invalid_prompt_retries: int = 0
     termination_reason: str = "unstarted"
     turns_used: int = 0
@@ -82,8 +78,7 @@ class RunRow(BaseModel):
     tool_call_errors: dict[str, int] = Field(default_factory=dict)
 
     # provenance
-    # None means no `temperature` kwarg was sent at all (API's own default applies) —
-    # distinct from 0.0, which means it was actually sent as zero.
+    # None = not sent (API default), unlike 0.0
     temperature: float | None = None
     reasoning_effort: str = ""
     harness_sha: str = ""

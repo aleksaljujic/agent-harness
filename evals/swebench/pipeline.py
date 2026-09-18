@@ -23,8 +23,7 @@ from harness.sandbox import Sandbox
 
 DEFAULT_TOOLS = list(TOOL_UNIVERSE)
 
-# How long to let an over-running agent thread wind down after it is asked to stop,
-# before giving up on it and recording the row anyway.
+# Grace period for a timed-out agent thread to stop before the row is recorded.
 STOP_GRACE_SECONDS = 5
 
 
@@ -34,12 +33,7 @@ def _harness_sha() -> str:
 
 
 def _error_detail(e: Exception) -> dict:
-    """Pull everything useful off an exception, especially an OpenAI API error.
-
-    `_run_agent_bounded` used to keep only `type(e).__name__`, which made a
-    BadRequestError undiagnosable after the fact — this captures the server's
-    actual error body so a failure can be understood without re-running.
-    """
+    """Collect exception details, including the API error body if present."""
     detail = {
         "type": type(e).__name__,
         "message": str(e),
@@ -55,9 +49,7 @@ def _error_detail(e: Exception) -> dict:
     if body is not None:
         detail["body"] = body
         if isinstance(body, dict):
-            # The OpenAI SDK hands back the flat error dict ({message, type, param,
-            # code}), not the {"error": {...}} envelope this used to assume — so
-            # api_code/api_message silently stayed None on every captured error.
+            # SDK returns a flat dict; the {"error": {...}} envelope is also handled.
             err = body["error"] if isinstance(body.get("error"), dict) else body
             detail["api_code"] = err.get("code")
             detail["api_param"] = err.get("param")
@@ -66,8 +58,7 @@ def _error_detail(e: Exception) -> dict:
     text = getattr(response, "text", None) if response is not None else None
     if text is not None:
         detail["response_text"] = text[:20000]
-    # Set by OpenAIProvider when it exhausted its invalid_prompt retries: without it
-    # a run that retried and still failed looks identical to one that never retried.
+    # Set by OpenAIProvider after exhausting invalid_prompt retries.
     retries = getattr(e, "invalid_prompt_retries", None)
     if retries is not None:
         detail["invalid_prompt_retries"] = retries
@@ -97,23 +88,15 @@ def _run_agent_bounded(agent: Agent, task: str, timeout: int) -> tuple[str, str,
             box["ret"] = agent.run(task)
         except Exception as e:  # noqa: BLE001
             box["exc"] = e
-            # Captured here, not in _error_detail: traceback.format_exc() reads the
-            # *current thread's* exception state, which is already gone by the time
-            # the main thread calls it after t.join() — it silently returned
-            # "NoneType: None" for every harness_error/api_error caught this way.
+            # Must be captured in this thread; format_exc() is per-thread.
             box["tb"] = traceback.format_exc()
 
     t = threading.Thread(target=target, daemon=True)
     t.start()
     t.join(timeout)
     if t.is_alive():
-        # Ask the agent to stop and give it a moment to leave the current turn, so
-        # agent.usage has settled before run_one reads it for the row. Without this
-        # the thread keeps running: the row's cost/token columns are a mid-flight
-        # snapshot, and the abandoned thread goes on dispatching tools into a sandbox
-        # run_one is about to destroy. Still alive after the grace period means it is
-        # blocked inside provider.complete(), which needs a client-level request
-        # timeout instead — this event cannot interrupt a blocking socket read.
+        # Stop the agent so usage is final and no tools hit a destroyed sandbox.
+        # Cannot interrupt a request already blocked in provider.complete().
         agent.stop.set()
         t.join(STOP_GRACE_SECONDS)
         return "wall_timeout", "", {}
@@ -122,13 +105,7 @@ def _run_agent_bounded(agent: Agent, task: str, timeout: int) -> tuple[str, str,
         detail = _error_detail(exc)
         if box.get("tb"):
             detail["traceback"] = box["tb"]
-        # openai.OpenAIError is the common base for every provider-side failure
-        # (rate limit, moderation, connection). Anything else raised inside
-        # agent.run() (a tool handler, sandbox subprocess, etc.) is a harness bug,
-        # not an API failure — mislabeling it "api_error" hides real bugs inside a
-        # bucket meant for provider outages, and confuses RECOMMENDATION.md's
-        # planned exclusion rules (which treat "API failure" and "infrastructure
-        # failure" as separate categories).
+        # Only provider-side failures count as api_error; anything else is a harness bug.
         reason = "api_error" if isinstance(exc, OpenAIError) else "harness_error"
         return reason, detail["type"], detail
     return agent.termination_reason, "", {}
@@ -174,11 +151,7 @@ def run_one(instance: dict, tools: list[str], run_index: int, *, provider, sessi
     finally:
         if s:
             s.destroy()
-        # The checkout is ~80MB and nothing reads it after predict.extract() has the
-        # diff in hand — left behind, 1200 runs come to ~100GB and the batch dies on
-        # a full disk long before it finishes. Deleted unless explicitly kept for
-        # debugging. Safe only because predictions are persisted per run now; while
-        # they were written per session, this directory was the sole copy of a patch.
+        # ~80MB per checkout; not needed once the diff is extracted.
         if not keep_work:
             shutil.rmtree(workdir, ignore_errors=True)
     wall_time = time.perf_counter() - wall_start
@@ -209,11 +182,7 @@ def run_one(instance: dict, tools: list[str], run_index: int, *, provider, sessi
         crashed=crashed,
         error_type=error_type,
         error_message=error_message,
-        # agent.usage only accumulates on a successful complete() return, so a run
-        # that exhausted its retries and then raised never gets counted there —
-        # error_detail (built from the exception itself) is the only place that
-        # carries it for a failed run. Prefer whichever is non-zero so the row
-        # answers "did it retry" without needing errors/<run>.json open.
+        # A failed run's retries are only in error_detail, not in usage.
         invalid_prompt_retries=(
             (usage.invalid_prompt_retries if usage else 0)
             or error_detail.get("invalid_prompt_retries", 0)
@@ -321,10 +290,7 @@ def run_pipeline(*, model, instances, tool_combos=None, tool_universe=None, repe
 
     provider = make_provider(settings, model=model, reasoning_effort=reasoning_effort,
                              temperature=temperature)
-    # Mirrors what OpenAIProvider.complete() actually puts on the wire: nothing
-    # (API default applies) unless an explicit temperature was passed, and never
-    # alongside reasoning_effort (reasoning models reject the parameter). Recorded
-    # on the row as-is — None there means "not sent", not "sent as 0.0".
+    # Temperature actually sent: never with reasoning_effort; None = not sent.
     effective_temperature = None if reasoning_effort else temperature
     max_turns = max_turns or swe_settings.max_turns
     run_timeout = run_timeout or swe_settings.run_timeout
@@ -334,9 +300,7 @@ def run_pipeline(*, model, instances, tool_combos=None, tool_universe=None, repe
         tool_combos = all_tool_combinations(tool_universe or DEFAULT_TOOLS, ("bash",))
 
     all_rows = []
-    # Resume: rows.jsonl is the record of what actually finished, keyed by run_id.
-    # Anything already in it is skipped and its row/prediction reused, so an
-    # interrupted batch continues instead of starting over.
+    # Resume: runs already in rows.jsonl are skipped.
     done_rows: dict[str, RunRow] = {}
     if resume_from:
         for line in (exp_root / "rows.jsonl").read_text(encoding="utf-8").splitlines():
@@ -349,14 +313,7 @@ def run_pipeline(*, model, instances, tool_combos=None, tool_universe=None, repe
     pbar = tqdm(total=total, desc="swebench", unit="run")
     pbar.update(len(done_rows))
 
-    # rows.jsonl is the metrics table everything downstream reads (cost, tokens,
-    # resolved, ...) — unlike conversations/messages/errors, which are written
-    # per-run, this used to be built up in memory and only ever hit disk once, at
-    # the very end. On a multi-hour, hundreds-of-runs batch that means a crash,
-    # Ctrl+C, or OOM anywhere before the last line throws away 100% of the table,
-    # even though every individual run's artifacts survived on disk. Checkpointed
-    # instead: a full rewrite after every run. At this scale (low thousands of rows
-    # at most) that's sub-millisecond, so there's no reason not to do it every time.
+    # Rewritten after every run so an interrupted batch keeps its results.
     rows_json = exp_root / "rows.jsonl"
 
     def _checkpoint(rows: list[RunRow]) -> None:
@@ -369,8 +326,7 @@ def run_pipeline(*, model, instances, tool_combos=None, tool_universe=None, repe
         preds_path = preds_dir / f"{session_id}.jsonl"
         session_rows, session_preds = [], []
         if resume_from:
-            # Patches come back from the per-run predictions file, not from work/ —
-            # those checkouts are deleted as soon as the diff is extracted.
+            # Checkouts are gone, so patches come from the predictions file.
             session_preds = predict.read_predictions(preds_path)
             session_rows = [done_rows[k] for k in
                             (f"{session_id}/{i['instance_id']}/{r}"
@@ -390,9 +346,7 @@ def run_pipeline(*, model, instances, tool_combos=None, tool_universe=None, repe
                 )
                 session_rows.append(row)
                 session_preds.append(prediction)
-                # Written every run, not once per session: a session is 300 instances
-                # and hours long, and until this was per-run an interrupt anywhere in
-                # it threw away every patch it had produced.
+                # Written after every run so an interrupt loses no patches.
                 predict.write_predictions(preds_path, session_preds)
                 run_name = f"{session_id}__{instance['instance_id']}__{run_index}"
                 (conv_dir / f"{run_name}.md").write_text(
@@ -439,8 +393,7 @@ def run_pipeline(*, model, instances, tool_combos=None, tool_universe=None, repe
     write_csv(csv_path, [r.csv_row() for r in all_rows])
 
     rollup = _rollup(all_rows)
-    # A resumed experiment keeps its original creation time — overwriting it with the
-    # resume time would lose when the data actually started being collected.
+    # A resumed experiment keeps its original creation time.
     manifest_path = exp_root / "manifest.json"
     created = timestamp
     if resume_from and manifest_path.exists():

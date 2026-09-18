@@ -43,11 +43,7 @@ class Agent:
         self.usage: Usage = Usage(model = self.provider.model)
         self.termination_reason: str = "unstarted"
         self.turns_used: int = 0
-        # Cooperative cancellation. A caller that bounds run() with a wall-clock
-        # timeout (see evals/swebench/pipeline.py::_run_agent_bounded) can only
-        # abandon the thread, not kill it — without this the abandoned thread keeps
-        # calling the model and dispatching tools against an already-destroyed
-        # sandbox, spending money nothing ever reads back.
+        # Set by a caller's timeout (_run_agent_bounded) to stop the loop.
         self.stop = threading.Event()
         self.messages = [
             {
@@ -88,8 +84,7 @@ class Agent:
                 return result.content
 
             for call in result.tool_calls:
-                # Re-checked per call, not just per turn: one turn can carry several
-                # tool calls and run long past the timeout on its own.
+                # Checked per tool call; one turn can have many.
                 if self.stop.is_set():
                     self.termination_reason = "stopped"
                     return "Stopped"

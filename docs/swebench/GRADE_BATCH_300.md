@@ -62,8 +62,17 @@ Docker Desktop moraju ostati upaljeni:
 
 ## 1. Setup repoa (u Ubuntu terminalu)
 
+Prvo proveriti da je terminal stvarno WSL Ubuntu, a ne Git Bash ili PowerShell:
+
 ```bash
-sudo apt update && sudo apt install -y git tmux   # proveriti: `tmux -V` mora ispisati verziju
+uname -r
+```
+
+Mora sadržati `microsoft-standard-WSL2`. Ako piše `MINGW64` ili nešto drugo, to
+je pogrešan terminal: otvoriti „Ubuntu“ iz Start menija.
+
+```bash
+sudo apt update && sudo apt install -y git
 curl -LsSf https://astral.sh/uv/install.sh | sh
 source ~/.local/bin/env
 
@@ -131,8 +140,8 @@ cd ~/agent-harness
 docker login
 ```
 
-`docker login` traži besplatan Docker Hub nalog, jer 300 pull-ova probija limit
-za anonimne korisnike.
+`docker login` traži besplatan Docker Hub nalog. Ulogovani korisnici imaju veći
+limit od anonimnih (vidi 3b), ali tačan broj za besplatan nalog nije proveren.
 
 ```bash
 python3 -c "import json; [print('swebench/sweb.eval.x86_64.' + json.loads(l)['instance_id'].replace('__', '_1776_').lower() + ':latest') for l in open('artifacts/swebench/experiments/20260915_120759_batch_300/predictions/gpt-5.4-nano__bash.jsonl')]" > images.txt
@@ -155,42 +164,46 @@ head -2 images.txt | cat -A
 Svaki red mora da se završava sa `:latest$`. Ako se završava sa `:latest^M$`,
 ponoviti `sed` komandu.
 
-**3b. Pull u `tmux`-u.** Prvo otvoriti sesiju:
+**3b. Pull.** Traje satima. Ubuntu prozor se **ne sme zatvoriti** dok radi,
+ali sme da se minimizuje. Prekid AnyDesk sesije ne gasi prozore na tom
+računaru, pa proces nastavlja da radi (vidi 0.3 za sleep i update).
+
+> **Docker Hub limit:** anonimno je dozvoljeno **100 pull-ova na sat** po IP
+> adresi (`ratelimit-limit: 100;w=3600`, izmereno sa laptopa 2026-09-16; na drugom
+> računaru proveriti komandom za preostali limit ispod). Za 300 image-a
+> treba najmanje 3 sata, a posle 100-tog stiže `429 Too Many Requests`. Zato
+> pull ide jedan po jedan: preskače već skinute, a na grešku čeka 10 min i
+> pokušava ponovo (do 12 puta).
 
 ```bash
-tmux new -s pull
+while read img; do docker image inspect "$img" >/dev/null 2>&1 && continue; for t in 1 2 3 4 5 6 7 8 9 10 11 12; do docker pull -q "$img" </dev/null && break; echo "neuspeh ($t/12), cekam 10 min: $img"; sleep 600; done; done < images.txt 2>&1 | tee -a pull.log
 ```
 
-Otvara se novi, prazan terminal (zelena traka dole). **Tek u njemu** pokrenuti:
+Napredak (u drugom prozoru), mora na kraju biti 300:
 
 ```bash
-cd ~/agent-harness
+docker images | grep -c sweb.eval
 ```
+
+Preostali limit za ovu IP adresu (ovaj upit se ne računa u limit):
 
 ```bash
-xargs -r -P 4 -n 1 docker pull < images.txt 2>&1 | tee pull.log
+TOKEN=$(curl -s "https://auth.docker.io/token?service=registry.docker.io&scope=repository:ratelimitpreview/test:pull" | sed -E 's/.*"token":"([^"]+)".*/\1/'); curl -s --head -H "Authorization: Bearer $TOKEN" https://registry-1.docker.io/v2/ratelimitpreview/test/manifests/latest | grep -i ratelimit-remaining
 ```
 
-Na kraju proveriti da je svih 300 tu. Ako neki fali, ponoviti isti `xargs`: već
-skinuti image-i se preskaču za par sekundi.
+Kad petlja završi, proveriti da ništa ne fali. Ako nešto fali, ponovo pokrenuti
+istu petlju:
 
 ```bash
 while read img; do docker image inspect "$img" >/dev/null 2>&1 || echo "FALI $img"; done < images.txt
 ```
 
-Kad ništa ne fali, zatvoriti `pull` sesiju komandom `exit`, da se sledeći `tmux`
-ne otvori unutar nje.
+Pull sme da ide i iz Git Bash-a (`MINGW64`), jer image-i završe u istom Docker
+Desktop-u. **Grading (korak 4) mora iz WSL Ubuntu-a.**
 
 ## 4. Grading
 
-Pokrenuti u `tmux`-u. Tako proces nastavlja i ako se zatvori Ubuntu prozor ili
-AnyDesk sesija.
-
-```bash
-tmux new -s grade
-```
-
-U novom `tmux` terminalu:
+Isto kao pull: pokrenuti u Ubuntu prozoru i ne zatvarati ga dok ne završi.
 
 ```bash
 cd ~/agent-harness
@@ -205,8 +218,8 @@ uv run scripts/run_swebench.py --limit 300 --combo bash --combo bash,str_replace
   `resuming 20260915_120759_batch_300: 1200 run(s) already done`. **Ako piše manje
   od 1200, odmah prekinuti (Ctrl+C)**, inače agent kreće da radi nove run-ove.
 - Ocenjuje se toolset po toolset (4 poziva evaluatora, po 300 instanci).
-- `tmux` detach: `Ctrl+B` pa `D`. Povratak (i posle nove AnyDesk sesije):
-  otvoriti Ubuntu terminal, pa `tmux attach -t grade`.
+- Ako se prozor ipak zatvori, proces staje. Tada samo ponovo pokrenuti istu
+  komandu (vidi „Ako se prekine“ ispod).
 - Ako je RAM tesan (Task Manager → `VmmemWSL` blizu 32 GB), prekinuti i spustiti
   na `--max-workers 4`.
 

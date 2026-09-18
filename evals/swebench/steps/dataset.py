@@ -3,8 +3,7 @@ import random
 from evals.swebench.config import INSTANCE_FIELDS, swe_settings
 from harness.load_data.load_swe_bench_lite import load_raw
 
-# Columns the pipeline needs. test_patch / FAIL_TO_PASS / PASS_TO_PASS are
-# deliberately excluded — the official evaluator reads those from the dataset.
+# Test columns are left out; the evaluator reads them from the dataset itself.
 _FIELDS = INSTANCE_FIELDS
 
 
