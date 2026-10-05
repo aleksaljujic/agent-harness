@@ -11,3 +11,33 @@ docs/evals/EVALS.md
 /logs/
 predictions/
 scratch/
+
+# --- Diplomski rad (thesis material, not code) ---
+/Diplomski rad.tex
+/Diplomski.md
+/Struktura diplomskog rada
+/novi benchmark
+/unicode caracter errpr
+docs/METODOLOGIJA.md
+docs/RECOMMENDATION.md
+docs/research/
+docs/evals/REPORT.md
+docs/todo/EVAL_PREP.md
+docs/swebench/AUDIT_REPORT.md
+docs/swebench/EXPERIMENT_LOCK.md
+docs/swebench/GRADE_BATCH_300.md
+docs/swebench/H1.md
+docs/swebench/H2.md
+docs/swebench/H3.md
+docs/swebench/METRICS.md
+docs/swebench/PLAN_REEVALUACIJA.md
+docs/swebench/REEVALUACIJA_IZMENE.md
+docs/swebench/REZIME.md
+docs/swebench/STATISTIKA.md
+docs/swebench/ZAKLJUCAK.md
+docs/media/h1_*.png
+docs/media/h2_*.png
+docs/media/h3_*.png
+docs/media/reeval/
+scripts/hypotheses_h1_h3.py
+scripts/localization.py
